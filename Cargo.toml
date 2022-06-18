@@ -2,12 +2,12 @@
 name = "dustdata"
 version = "0.1.0"
 edition = "2021"
+description = "A data concurrency control storage engine to Rustbase"
+license = "MIT"
 exclude = [
     "test_data/*",
 ]
 
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 bson = "2.2.0"
