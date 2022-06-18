@@ -3,6 +3,9 @@ name = "dustdata"
 version = "0.1.0"
 edition = "2021"
 description = "A data concurrency control storage engine to Rustbase"
+repository = "https://github.com/rustbase/dustdata"
+homepage = "https://github.com/rustbase/dustdata"
+authors = ["Rustbase"]
 license = "MIT"
 exclude = [
     "test_data/*",
