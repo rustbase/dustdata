@@ -46,7 +46,7 @@ let value = dustdata.get("key");
 println!("{:?}", value);
 ```
 
-## Deleting a data
+## Updating a data
 ```rust
 // ...
 let data = bson::doc! {
