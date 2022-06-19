@@ -68,4 +68,7 @@ impl DustData {
     pub fn delete(&mut self, key: &str) {
         self.lsm.delete(key);
     }
+    pub fn update(&mut self, key: &str, document: bson::Document) {
+        self.lsm.update(key, document);
+    }
 }

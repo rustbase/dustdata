@@ -57,6 +57,23 @@ impl Lsm {
         self.memtable.lock().unwrap().remove(&key.to_string());
     }
 
+    pub fn update(&mut self, key: &str, value: bson::Document) {
+        let document = self.memtable.lock().unwrap();
+
+        match document.get(&key.to_string()) {
+            Some(document) => {
+                self.memtable_size -= mem::size_of_val(&document);
+                self.memtable.lock().unwrap().insert(key.to_string(), value.clone());
+                self.memtable_size += mem::size_of_val(&value);
+            },
+
+            None => {
+                // Search on sstable
+                todo!();
+            },
+        }
+    }
+
     pub fn flush(&mut self) {
         todo!();
     }
