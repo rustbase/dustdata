@@ -49,6 +49,20 @@ println!("{:?}", value);
 ## Deleting a data
 ```rust
 // ...
+let data = bson::doc! {
+    "name": "DustData",
+    "version": "0.1.0",
+    "description": "A data concurrency control storage engine to Rustbase",
+    "author": "Rustbase",
+    "license": "MIT"
+}
+
+dustdata.update("key", data);
+```
+
+## Deleting a data
+```rust
+// ...
 dustdata.delete("key");
 ```
 
