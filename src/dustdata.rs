@@ -1,25 +1,32 @@
 use super::storage;
 
 use std::path;
-use std::fs;
+use std::sync::{Arc, Mutex};
 use storage::lsm;
 
+/// A LSM configuration
+/// # Arguments
+/// * `flush_threshold` - The number of bytes to flush before flushing to disk
+#[derive(Clone)]
+pub struct LsmConfig {
+    pub flush_threshold: usize,
+}
 
 /// A DustData configuration
 /// # Arguments
 /// * `path` - The path to the data directory
-/// * `use_compression` - Whether to use compression
 /// * `cache_size` - The size of the cache (in bytes)
+/// * `lsm_config` - The LSM configuration
 #[derive(Clone)]
 pub struct DustDataConfig {
     pub cache_size: usize,
     pub path: String,
-    pub lsm_config: storage::lsm::LsmConfig,
+    pub lsm_config: LsmConfig,
 }
 
 pub struct DustData {
     pub config: DustDataConfig,
-    pub cache: super::cache::Cache,
+    pub cache: Arc<Mutex<super::cache::Cache>>,
     pub lsm: storage::lsm::Lsm,
 }
 
@@ -27,15 +34,16 @@ impl DustData {
     pub fn new(configuration: DustDataConfig) -> Self {
         let path = path::Path::new(&configuration.path);
 
-        let cache = super::cache::Cache::new(configuration.cache_size);
+        let cache = super::cache::Cache::new_app_cache(configuration.cache_size);
 
-        if !path.join("sstable").exists() {
-            fs::create_dir_all(path.join("sstable")).unwrap();
-        }
+        let lsm = storage::lsm::Lsm::new(lsm::LsmConfig {
+            flush_threshold: configuration.lsm_config.flush_threshold,
+            sstable_path: path.to_str().unwrap().to_string(),
+        });
 
         Self {
             cache,
-            lsm: storage::lsm::Lsm::new(configuration.clone().lsm_config),
+            lsm,
             config: configuration,
         }
     }
@@ -46,7 +54,8 @@ impl DustData {
     /// # Returns
     /// - `Some(bson::Document)` if value was found returns a bson document
     pub fn get(&mut self, key: &str) -> Option<bson::Document> {
-        let document = self.cache.get(key);
+        let cache = self.cache.lock().unwrap();
+        let document = cache.get(key);
 
         if let Some(document) = document {
             return Some(document.result.as_document().unwrap().clone());
@@ -55,7 +64,10 @@ impl DustData {
         let document = self.lsm.get(key);
 
         if document.is_some() {
-            self.cache.add(key.to_string(), bson::Bson::Document(document.as_ref().unwrap().clone()));
+            self.cache.lock().unwrap().add(
+                key.to_string(),
+                bson::Bson::Document(document.as_ref().unwrap().clone()),
+            );
         }
 
         document
@@ -73,7 +85,7 @@ impl DustData {
     /// # Arguments
     /// - `key`: a key to search for and delete it.
     pub fn delete(&mut self, key: &str) {
-        self.lsm.delete(key);
+        self.lsm.delete(key).expect("Failed to delete key");
     }
 
     /// Update a value with a key
