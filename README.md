@@ -1,11 +1,22 @@
 # DustData
 A data concurrency control storage engine to [Rustbase](https://github.com/rustbase/rustbase)
 
+# ⚠️ Warning 
+This is a work in progress. The API is not stable yet.
+
 # 🔗 Contribute
 [Click here](./CONTRIBUTING.md) to see how to Contribute
 
 # Dependencies
+These are dependencies that are required to use the DustData.
  - [bson](https://crates.io/crates/bson)
+
+# How to install
+Add the following to your `Cargo.toml`:
+```toml
+[dependencies]
+dustdata = "0.2.0"
+```
 
 # Usage
 Initialize a DustData interface.
@@ -14,10 +25,9 @@ Initialize a DustData interface.
 let config = dustdata::DustDataConfig {
     path: "./test_data".to_string(),
     lsm_config: storage::lsm::LsmConfig {
-        flush_threshold: 128,
-        sstable_path: "./test_data/sstable".to_string(),
+        flush_threshold: 128 * 1024 * 1024, // 128MB
     },
-    cache_size: 256,
+    cache_size: 256 * 1024 * 1024, // 256MB
 }
 
 // Create a DustData interface
@@ -67,8 +77,9 @@ dustdata.delete("key");
 ```
 
 # To-dos
- - [x] Memtable 
- - [ ] SStable
+ - [x] Memtable (06/19/22)
+ - [x] SSTable (08/20/22)
+ - [ ] Document oriented
  - [ ] Logs
  - [ ] Encryption
 
