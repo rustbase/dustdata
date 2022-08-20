@@ -1,3 +1,6 @@
+[![crates.io](https://img.shields.io/crates/v/dustdata?color=EA4342&style=flat-square)](https://crates.io/crates/dustdata)
+
+
 # DustData
 A data concurrency control storage engine to [Rustbase](https://github.com/rustbase/rustbase)
 

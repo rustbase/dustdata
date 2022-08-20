@@ -3,6 +3,8 @@ mod cache;
 mod dustdata;
 mod storage;
 
+pub use self::{dustdata::DustData, dustdata::DustDataConfig};
+
 /// Initialize the database
 /// # Arguments
 /// * `config` - A configuration object
