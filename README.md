@@ -18,7 +18,7 @@ These are dependencies that are required to use the DustData.
 Add the following to your `Cargo.toml`:
 ```toml
 [dependencies]
-dustdata = "0.2.0"
+dustdata = "0.2.1"
 ```
 
 # Usage
@@ -42,11 +42,8 @@ let mut dustdata = dustdata::initialize(config);
 // ...
 // Creating a data
 let data = bson::doc! {
-    "name": "DustData",
-    "version": "0.1.0",
-    "description": "A data concurrency control storage engine to Rustbase",
-    "author": "DustData",
-    "license": "MIT"
+    "name": "John Doe",
+    "age": 30,
 }
 
 dustdata.insert("key", data);
@@ -63,11 +60,8 @@ println!("{:?}", value);
 ```rust
 // ...
 let data = bson::doc! {
-    "name": "DustData",
-    "version": "0.1.0",
-    "description": "A data concurrency control storage engine to Rustbase",
-    "author": "Rustbase",
-    "license": "MIT"
+    "name": "Joe Mamma",
+    "age": 42,
 }
 
 dustdata.update("key", data);
