@@ -3,7 +3,7 @@ mod cache;
 mod dustdata;
 mod storage;
 
-pub use self::{dustdata::DustData, dustdata::DustDataConfig};
+pub use self::{dustdata::DustData, dustdata::DustDataConfig, dustdata::LsmConfig};
 
 /// Initialize the database
 /// # Arguments
