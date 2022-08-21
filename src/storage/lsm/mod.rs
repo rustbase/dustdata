@@ -83,8 +83,8 @@ impl Lsm {
         match document.get(&key.to_string()) {
             Some(document) => Some(document.clone()),
             None => {
-                let sparse_index = self.dense_index.lock().unwrap();
-                let offset = sparse_index.get(&key.to_string()).unwrap();
+                let dense_index = self.dense_index.lock().unwrap();
+                let offset = dense_index.get(&key.to_string()).unwrap();
                 sstable::Segment::read_with_offset(
                     offset.to_string(),
                     self.lsm_config.sstable_path.to_string(),
@@ -107,21 +107,15 @@ impl Lsm {
         Ok(())
     }
 
-    pub fn update(&mut self, key: &str, value: bson::Document) {
-        let document = self.memtable.lock().unwrap();
-
-        match document.get(&key.to_string()) {
-            Some(document) => {
-                self.memtable_size -= mem::size_of_val(&document);
-                self.memtable
-                    .lock()
-                    .unwrap()
-                    .insert(key.to_string(), value.clone());
-                self.memtable_size += mem::size_of_val(&value);
-            }
-
-            None => {}
+    pub fn update(&mut self, key: &str, value: bson::Document) -> Result<(), &str> {
+        if !self.contains(key) {
+            return Err("Key does not exist");
         }
+
+        self.delete(key).unwrap();
+        self.insert(key, value).unwrap();
+
+        Ok(())
     }
 
     pub fn flush(&mut self) {

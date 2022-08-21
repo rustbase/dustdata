@@ -77,22 +77,22 @@ impl DustData {
     /// # Arguments
     /// - `key`: a key.
     /// - `document`: a bson document to insert
-    pub fn insert(&mut self, key: &str, document: bson::Document) {
-        self.lsm.insert(key, document).unwrap();
+    pub fn insert(&mut self, key: &str, document: bson::Document) -> Result<(), &str> {
+        self.lsm.insert(key, document)
     }
 
     /// Delete a value with a key
     /// # Arguments
     /// - `key`: a key to search for and delete it.
-    pub fn delete(&mut self, key: &str) {
-        self.lsm.delete(key).expect("Failed to delete key");
+    pub fn delete(&mut self, key: &str) -> Result<(), &str> {
+        self.lsm.delete(key)
     }
 
     /// Update a value with a key
     /// # Arguments
     /// - `key`: a key to search for and update it.
     /// - `document`: the new document to replace the old one.
-    pub fn update(&mut self, key: &str, document: bson::Document) {
-        self.lsm.update(key, document);
+    pub fn update(&mut self, key: &str, document: bson::Document) -> Result<(), &str> {
+        self.lsm.update(key, document)
     }
 }
