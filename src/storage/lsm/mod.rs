@@ -182,39 +182,3 @@ impl Drop for Lsm {
         }
     }
 }
-
-#[cfg(test)]
-mod lsm_tests {
-    use super::*;
-
-    #[test]
-    pub fn create_lsm() {
-        let mut lsm = Lsm::new(LsmConfig {
-            flush_threshold: 128 * 1024 * 1024, // 128 MB
-            sstable_path: "./test_data".to_string(),
-        });
-
-        lsm.insert(
-            "person_1",
-            bson::doc! {
-                "name": "Pedro Augusto",
-                "age": 16,
-            },
-        )
-        .unwrap();
-
-        lsm.insert(
-            "person_2",
-            bson::doc! {
-                "name": "Gabriel Henrique",
-                "age": 19,
-            },
-        )
-        .unwrap();
-
-        assert!(lsm.get("person_1").is_some());
-        assert!(lsm.get("person_2").is_some());
-
-        assert!(lsm.get("person_3").is_none()); // Should not exist
-    }
-}

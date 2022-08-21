@@ -18,7 +18,7 @@ These are dependencies that are required to use the DustData.
 Add the following to your `Cargo.toml`:
 ```toml
 [dependencies]
-dustdata = "0.2.3"
+dustdata = "0.2.4"
 ```
 
 # Usage
@@ -28,12 +28,10 @@ Initialize a DustData interface.
 let config = dustdata::DustDataConfig {
     path: "./test_data".to_string(),
     lsm_config: dustdata::LsmConfig {
-        flush_threshold: 128 * 1024 * 1024, // 128MB
-    },
-    cache_size: 256 * 1024 * 1024, // 256MB
-}
-
-// Create a DustData interface
+        flush_threshold: dustdata::Size::Megabytes(128),
+    }
+};
+        
 let mut dustdata = dustdata::initialize(config);
 ```
 
