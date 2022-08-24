@@ -28,7 +28,7 @@ pub struct DustData {
     pub lsm: storage::lsm::Lsm,
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Size {
     Bytes(usize),
     Kilobytes(usize),
@@ -40,31 +40,12 @@ impl Add for Size {
     type Output = Size;
 
     fn add(self, rhs: Self) -> Self::Output {
-        match self {
-            Size::Bytes(lhs) => match rhs {
-                Size::Bytes(rhs) => Size::Bytes(lhs + rhs),
-                Size::Kilobytes(rhs) => Size::Bytes(lhs + (rhs * 1024)),
-                Size::Megabytes(rhs) => Size::Bytes(lhs + (rhs * 1024 * 1024)),
-                Size::Gigabytes(rhs) => Size::Bytes(lhs + (rhs * 1024 * 1024 * 1024)),
-            },
-            Size::Kilobytes(lhs) => match rhs {
-                Size::Bytes(rhs) => Size::Bytes(lhs + (rhs * 1024)),
-                Size::Kilobytes(rhs) => Size::Kilobytes(lhs + rhs),
-                Size::Megabytes(rhs) => Size::Kilobytes(lhs + (rhs * 1024)),
-                Size::Gigabytes(rhs) => Size::Kilobytes(lhs + (rhs * 1024 * 1024)),
-            },
-            Size::Megabytes(lhs) => match rhs {
-                Size::Bytes(rhs) => Size::Bytes(lhs + (rhs * 1024 * 1024)),
-                Size::Kilobytes(rhs) => Size::Bytes(lhs + (rhs * 1024 * 1024 * 1024)),
-                Size::Megabytes(rhs) => Size::Megabytes(lhs + rhs),
-                Size::Gigabytes(rhs) => Size::Megabytes(lhs + (rhs * 1024)),
-            },
-            Size::Gigabytes(lhs) => match rhs {
-                Size::Bytes(rhs) => Size::Bytes(lhs + (rhs * 1024 * 1024 * 1024)),
-                Size::Kilobytes(rhs) => Size::Bytes(lhs + (rhs * 1024 * 1024 * 1024 * 1024)),
-                Size::Megabytes(rhs) => Size::Bytes(lhs + (rhs * 1024 * 1024 * 1024 * 1024 * 1024)),
-                Size::Gigabytes(rhs) => Size::Gigabytes(lhs + rhs),
-            },
+        match (self, rhs) {
+            (Size::Bytes(a), Size::Bytes(b)) => Size::Bytes(a + b),
+            (Size::Kilobytes(a), Size::Kilobytes(b)) => Size::Kilobytes(a + b),
+            (Size::Megabytes(a), Size::Megabytes(b)) => Size::Megabytes(a + b),
+            (Size::Gigabytes(a), Size::Gigabytes(b)) => Size::Gigabytes(a + b),
+            _ => panic!("Cannot add two different sizes"),
         }
     }
 }
@@ -123,5 +104,42 @@ impl DustData {
     /// - `document`: the new document to replace the old one.
     pub fn update(&mut self, key: &str, document: bson::Document) -> Result<(), &str> {
         self.lsm.update(key, document)
+    }
+}
+
+#[cfg(test)]
+mod size_tests {
+    use super::*;
+
+    #[test]
+    fn add_impl_bytes() {
+        let size = Size::Bytes(1);
+        let size2 = Size::Bytes(2);
+        let size3 = parse_size(size + size2);
+        assert_eq!(size3, parse_size(Size::Bytes(3)));
+    }
+
+    #[test]
+    fn add_impl_gb() {
+        let size = Size::Gigabytes(1);
+        let size2 = Size::Gigabytes(2);
+        let size3 = parse_size(size + size2);
+        assert_eq!(size3, parse_size(Size::Gigabytes(3)));
+    }
+
+    #[test]
+    fn add_impl_mb() {
+        let size = Size::Megabytes(1);
+        let size2 = Size::Megabytes(2);
+        let size3 = parse_size(size + size2);
+        assert_eq!(size3, parse_size(Size::Megabytes(3)));
+    }
+
+    #[test]
+    fn add_impl_kb() {
+        let size = Size::Kilobytes(1);
+        let size2 = Size::Kilobytes(2);
+        let size3 = parse_size(size + size2);
+        assert_eq!(size3, parse_size(Size::Kilobytes(3)));
     }
 }
