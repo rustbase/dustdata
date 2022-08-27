@@ -74,7 +74,6 @@ dustdata.delete("key");
 # To-dos
  - [x] Memtable (06/19/22)
  - [x] SSTable (08/20/22)
- - [ ] Document oriented
  - [ ] Logs
  - [ ] Encryption
 

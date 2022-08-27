@@ -3,7 +3,7 @@ Every help is welcome! See how to contribute below
 
 # Starting
  1. Fork this project on Github
- 2. Make a clone of the created fork repository: `git clone https://github.com/youruser/rustbase.git`
+ 2. Make a clone of the created fork repository: `git clone https://github.com/youruser/dustdata.git`
  3. Create a branch to commit your feature or fix: `git checkout -b my-branch`
  4. And make your changes!
 
