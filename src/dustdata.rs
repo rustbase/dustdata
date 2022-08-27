@@ -79,7 +79,7 @@ impl DustData {
     /// - `key`: a key to search for
     /// # Returns
     /// - `Some(bson::Document)` if value was found returns a bson document
-    pub fn get(&mut self, key: &str) -> Option<bson::Document> {
+    pub fn get(&self, key: &str) -> Option<bson::Document> {
         self.lsm.get(key)
     }
 
