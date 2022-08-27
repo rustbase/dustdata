@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::mem;
 use std::ops::Deref;
 use std::path;
@@ -19,7 +19,7 @@ pub struct LsmConfig {
 
 #[derive(Clone)]
 pub struct Lsm {
-    pub memtable: Arc<Mutex<rbtree::RBTree<String, bson::Document>>>,
+    pub memtable: Arc<Mutex<BTreeMap<String, bson::Document>>>,
     pub memtable_size: usize,
     pub lsm_config: LsmConfig,
     pub dense_index: Arc<Mutex<HashMap<String, String>>>,
@@ -47,7 +47,7 @@ impl Lsm {
         }
 
         Lsm {
-            memtable: Arc::new(Mutex::new(rbtree::RBTree::new())),
+            memtable: Arc::new(Mutex::new(BTreeMap::new())),
             bloom_filter: Arc::new(Mutex::new(bloom_filter)),
             dense_index: Arc::new(Mutex::new(index)),
             lsm_config: config,
@@ -132,7 +132,7 @@ impl Lsm {
         self.memtable_size = 0;
     }
 
-    pub fn get_memtable(&self) -> rbtree::RBTree<String, bson::Document> {
+    pub fn get_memtable(&self) -> BTreeMap<String, bson::Document> {
         self.memtable.lock().unwrap().clone()
     }
 

@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fs;
 use std::os::unix::prelude::FileExt;
 use std::path;
@@ -122,7 +123,7 @@ impl Segment {
     }
 
     pub fn from_tree(
-        tree: &rbtree::RBTree<String, bson::Document>,
+        tree: &BTreeMap<String, bson::Document>,
         path: &str,
     ) -> (Segment, Vec<(String, String)>) {
         let mut segment = Segment::new(path);

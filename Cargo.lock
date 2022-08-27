@@ -101,7 +101,6 @@ dependencies = [
  "hex",
  "lzzzz",
  "rand 0.8.5",
- "rbtree",
 ]
 
 [[package]]
@@ -334,12 +333,6 @@ checksum = "d34f1408f55294453790c48b2f1ebbb1c5b4b7563eb1f418bcfcfdbb06ebb4e7"
 dependencies = [
  "getrandom",
 ]
-
-[[package]]
-name = "rbtree"
-version = "0.1.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c30302bfb88dd71dce9b3577ab7f607a246ecee387717e937d49466a6d4d4760"
 
 [[package]]
 name = "rdrand"
