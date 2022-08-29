@@ -36,7 +36,7 @@ mod dustdata_tests {
         )
         .unwrap();
 
-        assert!(dd.get("test").is_some());
+        assert!(dd.get("test").unwrap().is_some());
 
         dd.delete("test").unwrap(); // delete the test document
     }

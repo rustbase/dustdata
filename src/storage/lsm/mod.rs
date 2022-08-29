@@ -5,6 +5,7 @@ use std::path;
 use std::sync::{Arc, Mutex};
 
 use crate::bloom::BloomFilter;
+use crate::dustdata::{Error, ErrorCode, Result};
 
 mod filter;
 mod index;
@@ -55,9 +56,12 @@ impl Lsm {
         }
     }
 
-    pub fn insert(&mut self, key: &str, value: bson::Document) -> Result<(), &str> {
+    pub fn insert(&mut self, key: &str, value: bson::Document) -> Result<()> {
         if self.contains(key) {
-            return Err("Key already exists");
+            return Err(Error {
+                code: ErrorCode::KeyExists,
+                message: "Key already exists".to_string(),
+            });
         }
 
         self.memtable_size += mem::size_of_val(&value);
@@ -73,43 +77,51 @@ impl Lsm {
         Ok(())
     }
 
-    pub fn get(&self, key: &str) -> Option<bson::Document> {
+    pub fn get(&self, key: &str) -> Result<Option<bson::Document>> {
         if !self.contains(key) {
-            return None;
+            return Ok(None);
         }
 
         let document = self.memtable.lock().unwrap();
 
         match document.get(&key.to_string()) {
-            Some(document) => Some(document.clone()),
+            Some(document) => Ok(Some(document.clone())),
             None => {
                 let dense_index = self.dense_index.lock().unwrap();
                 let offset = dense_index.get(&key.to_string()).unwrap();
-                sstable::Segment::read_with_offset(
+                Ok(sstable::Segment::read_with_offset(
                     offset.to_string(),
                     self.lsm_config.sstable_path.to_string(),
-                )
+                ))
             }
         }
     }
 
-    pub fn delete(&mut self, key: &str) -> Result<(), &str> {
+    pub fn delete(&mut self, key: &str) -> Result<()> {
         if !self.contains(key) {
-            return Err("Key does not exist");
+            return Err(Error {
+                code: ErrorCode::KeyNotExists,
+                message: "Key does not exist".to_string(),
+            });
         }
 
         if self.memtable.lock().unwrap().contains_key(&key.to_string()) {
             self.memtable.lock().unwrap().remove(&key.to_string());
         } else {
             self.dense_index.lock().unwrap().remove(&key.to_string());
-            self.bloom_filter.lock().unwrap().delete(key);
         }
+
+        self.bloom_filter.lock().unwrap().delete(key);
+
         Ok(())
     }
 
-    pub fn update(&mut self, key: &str, value: bson::Document) -> Result<(), &str> {
+    pub fn update(&mut self, key: &str, value: bson::Document) -> Result<()> {
         if !self.contains(key) {
-            return Err("Key does not exist");
+            return Err(Error {
+                code: ErrorCode::KeyNotExists,
+                message: "Key does not exist".to_string(),
+            });
         }
 
         self.delete(key).unwrap();

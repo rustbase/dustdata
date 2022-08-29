@@ -59,6 +59,37 @@ pub fn parse_size(size: Size) -> usize {
     }
 }
 
+pub type Result<T> = std::result::Result<T, Error>;
+
+#[derive(Debug, Clone)]
+pub struct Error {
+    pub code: ErrorCode,
+    pub message: String,
+}
+
+#[derive(Debug, Clone)]
+pub enum ErrorCode {
+    NotFound,
+    KeyExists,
+    KeyNotExists,
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "Code: {} - Message: {}", self.code, self.message)
+    }
+}
+
+impl std::fmt::Display for ErrorCode {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            ErrorCode::NotFound => write!(f, "NotFound"),
+            ErrorCode::KeyExists => write!(f, "KeyExists"),
+            ErrorCode::KeyNotExists => write!(f, "KeyNotExists"),
+        }
+    }
+}
+
 impl DustData {
     pub fn new(configuration: DustDataConfig) -> Self {
         let path = path::Path::new(&configuration.path);
@@ -79,7 +110,7 @@ impl DustData {
     /// - `key`: a key to search for
     /// # Returns
     /// - `Some(bson::Document)` if value was found returns a bson document
-    pub fn get(&self, key: &str) -> Option<bson::Document> {
+    pub fn get(&self, key: &str) -> Result<Option<bson::Document>> {
         self.lsm.get(key)
     }
 
@@ -87,14 +118,14 @@ impl DustData {
     /// # Arguments
     /// - `key`: a key.
     /// - `document`: a bson document to insert
-    pub fn insert(&mut self, key: &str, document: bson::Document) -> Result<(), &str> {
+    pub fn insert(&mut self, key: &str, document: bson::Document) -> Result<()> {
         self.lsm.insert(key, document)
     }
 
     /// Delete a value with a key
     /// # Arguments
     /// - `key`: a key to search for and delete it.
-    pub fn delete(&mut self, key: &str) -> Result<(), &str> {
+    pub fn delete(&mut self, key: &str) -> Result<()> {
         self.lsm.delete(key)
     }
 
@@ -102,7 +133,7 @@ impl DustData {
     /// # Arguments
     /// - `key`: a key to search for and update it.
     /// - `document`: the new document to replace the old one.
-    pub fn update(&mut self, key: &str, document: bson::Document) -> Result<(), &str> {
+    pub fn update(&mut self, key: &str, document: bson::Document) -> Result<()> {
         self.lsm.update(key, document)
     }
 }
