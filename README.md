@@ -4,6 +4,8 @@
 # DustData
 A data concurrency control storage engine to [Rustbase](https://github.com/rustbase/rustbase)
 
+Join our [community](https://discord.gg/m5ZzWPumbd) and [chat](https://discord.gg/m5ZzWPumbd) with other Rust users.
+
 # ⚠️ Warning 
 This is a work in progress. The API is not stable yet.
 
