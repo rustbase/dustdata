@@ -17,9 +17,7 @@ exclude = [
 
 [dependencies]
 bson = "2.4.0"
-rand = "0.8.5"
 hex = "0.4.3"
 lzzzz = "1.0.3"
-chrono = "0.4.19"
 fasthash = "0.4.0"
 bitvec = "1.0.1"
