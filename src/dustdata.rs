@@ -136,6 +136,13 @@ impl DustData {
     pub fn update(&mut self, key: &str, document: bson::Document) -> Result<()> {
         self.lsm.update(key, document)
     }
+
+    /// Check if key exists.
+    /// # Arguments
+    /// - `key`: a key to check if exists.
+    pub fn contains(&mut self, key: &str) -> bool {
+        self.lsm.contains(key)
+    }
 }
 
 #[cfg(test)]
