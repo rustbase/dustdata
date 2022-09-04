@@ -17,27 +17,61 @@ pub fn initialize(config: dustdata::DustDataConfig) -> dustdata::DustData {
 mod dustdata_tests {
     use super::*;
 
-    #[test]
-    fn insert_document() {
-        let config = DustDataConfig {
+    fn get_default_config() -> DustDataConfig {
+        DustDataConfig {
             path: "./test_data".to_string(),
             lsm_config: LsmConfig {
                 flush_threshold: Size::Megabytes(128),
             },
-        };
+        }
+    }
+
+    #[test]
+    fn insert_document() {
+        let config = get_default_config();
 
         let mut dd = initialize(config);
 
         dd.insert(
-            "test",
+            "insert_doc",
             bson::doc! {
                 "test": "test"
             },
         )
         .unwrap();
 
-        assert!(dd.get("test").unwrap().is_some());
+        assert!(dd.get("insert_doc").unwrap().is_some());
 
-        dd.delete("test").unwrap(); // delete the test document
+        dd.delete("insert_doc").unwrap(); // delete the test document
+    }
+
+    #[test]
+    fn update_document() {
+        let config = get_default_config();
+
+        let mut dd = initialize(config);
+        dd.insert(
+            "update_doc",
+            bson::doc! {
+                "test": "test"
+            },
+        )
+        .unwrap();
+
+        dd.update(
+            "update_doc",
+            bson::doc! {
+                "test": "test2"
+            },
+        )
+        .unwrap();
+
+        let get = dd.get("update_doc").unwrap().unwrap();
+
+        let get = get.get("test").unwrap().as_str().unwrap();
+
+        assert_eq!(get, "test2");
+
+        dd.delete("update_doc").unwrap(); // delete the test document
     }
 }
