@@ -56,6 +56,39 @@ impl Lsm {
         }
     }
 
+    pub fn handle_ctrlc(&mut self) {
+        let c_mem = Arc::clone(&self.memtable);
+        let c_den = Arc::clone(&self.dense_index);
+        let c_config = self.lsm_config.clone();
+        let c_bloom = Arc::clone(&self.bloom_filter);
+
+        ctrlc::set_handler(move || {
+            let memtable = c_mem.lock().unwrap();
+            let segments =
+                sstable::Segment::from_tree(memtable.deref(), c_config.sstable_path.as_str());
+
+            for token in segments.1 {
+                c_den.lock().unwrap().insert(token.0, token.1);
+            }
+
+            let dense_index = c_den.lock().unwrap();
+            let bloom_filter = c_bloom.lock().unwrap();
+
+            index::write_index(&c_config.sstable_path, dense_index.deref());
+
+            let mut keys = Vec::new();
+
+            for segment in dense_index.deref() {
+                keys.push(segment.0.clone());
+            }
+
+            filter::write_filter(&c_config.sstable_path, bloom_filter.deref());
+
+            std::process::exit(0);
+        })
+        .ok();
+    }
+
     pub fn insert(&mut self, key: &str, value: bson::Document) -> Result<()> {
         if self.contains(key) {
             return Err(Error {

@@ -94,10 +94,12 @@ impl DustData {
     pub fn new(configuration: DustDataConfig) -> Self {
         let path = path::Path::new(&configuration.path);
 
-        let lsm = storage::lsm::Lsm::new(lsm::LsmConfig {
+        let mut lsm = storage::lsm::Lsm::new(lsm::LsmConfig {
             flush_threshold: parse_size(configuration.clone().lsm_config.flush_threshold),
             sstable_path: path.to_str().unwrap().to_string(),
         });
+
+        lsm.handle_ctrlc();
 
         Self {
             lsm,
