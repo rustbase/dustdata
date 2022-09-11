@@ -1,6 +1,6 @@
 [package]
 name = "dustdata"
-version = "0.2.8"
+version = "0.2.9-alpha.1"
 edition = "2021"
 description = "A data concurrency control storage engine to Rustbase"
 repository = "https://github.com/rustbase/dustdata"
@@ -21,3 +21,4 @@ hex = "0.4.3"
 lzzzz = "1.0.3"
 fasthash = "0.4.0"
 bitvec = "1.0.1"
+ctrlc = "3.2.3"
