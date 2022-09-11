@@ -83,6 +83,8 @@ impl Lsm {
             }
 
             filter::write_filter(&c_config.sstable_path, bloom_filter.deref());
+
+            std::process::exit(0);
         })
         .ok();
     }
