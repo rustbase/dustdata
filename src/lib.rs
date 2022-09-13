@@ -36,9 +36,9 @@ mod dustdata_tests {
 
         dd.insert(
             "insert_doc",
-            bson::doc! {
+            bson::bson!({
                 "test": "test"
-            },
+            }),
         )
         .unwrap();
 
@@ -54,21 +54,22 @@ mod dustdata_tests {
         let mut dd = initialize(config);
         dd.insert(
             "update_doc",
-            bson::doc! {
+            bson::bson!({
                 "test": "test"
-            },
+            }),
         )
         .unwrap();
 
         dd.update(
             "update_doc",
-            bson::doc! {
+            bson::bson! ({
                 "test": "test2"
-            },
+            }),
         )
         .unwrap();
 
         let get = dd.get("update_doc").unwrap().unwrap();
+        let get = get.as_document().unwrap();
 
         let get = get.get("test").unwrap().as_str().unwrap();
 

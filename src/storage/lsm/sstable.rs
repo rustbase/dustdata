@@ -89,7 +89,7 @@ impl Segment {
         }
     }
 
-    pub fn read_with_offset(offset: String, path: String) -> Option<bson::Document> {
+    pub fn read_with_offset(offset: String, path: String) -> Option<bson::Bson> {
         let splited_offset = offset.split('_').collect::<Vec<&str>>();
         let file_index = splited_offset[0].parse::<u64>().unwrap();
         let offset = splited_offset[1].parse::<u64>().unwrap();
@@ -114,16 +114,16 @@ impl Segment {
 
         let document: Document = bson::from_slice(&document_bytes).unwrap();
 
-        Some(document.get_document("_value").unwrap().clone())
+        Some(document.get("_value").unwrap().clone())
     }
 
-    pub fn write(&mut self, key: &str, value: bson::Document) -> (String, String) {
+    pub fn write(&mut self, key: &str, value: bson::Bson) -> (String, String) {
         // Returns the key and the offset to put in sparse index
         (key.to_string(), self.persist(key, value).unwrap())
     }
 
     pub fn from_tree(
-        tree: &BTreeMap<String, bson::Document>,
+        tree: &BTreeMap<String, bson::Bson>,
         path: &str,
     ) -> (Segment, Vec<(String, String)>) {
         let mut segment = Segment::new(path);
