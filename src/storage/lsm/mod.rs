@@ -22,7 +22,7 @@ pub struct LsmConfig {
 
 #[derive(Clone)]
 pub struct Lsm {
-    pub memtable: Arc<Mutex<BTreeMap<String, bson::Document>>>,
+    pub memtable: Arc<Mutex<BTreeMap<String, bson::Bson>>>,
     pub memtable_size: usize,
     pub lsm_config: LsmConfig,
     pub dense_index: Arc<Mutex<HashMap<String, String>>>,
@@ -96,7 +96,7 @@ impl Lsm {
         .ok();
     }
 
-    pub fn insert(&mut self, key: &str, value: bson::Document) -> Result<()> {
+    pub fn insert(&mut self, key: &str, value: bson::Bson) -> Result<()> {
         if self.contains(key) {
             return Err(Error {
                 code: ErrorCode::KeyExists,
@@ -117,14 +117,14 @@ impl Lsm {
         Ok(())
     }
 
-    pub fn get(&self, key: &str) -> Result<Option<bson::Document>> {
+    pub fn get(&self, key: &str) -> Result<Option<bson::Bson>> {
         if !self.contains(key) {
             return Ok(None);
         }
 
-        let document = self.memtable.lock().unwrap();
+        let memtable = self.memtable.lock().unwrap();
 
-        match document.get(&key.to_string()) {
+        match memtable.get(&key.to_string()) {
             Some(document) => Ok(Some(document.clone())),
             None => {
                 let dense_index = self.dense_index.lock().unwrap();
@@ -156,7 +156,7 @@ impl Lsm {
         Ok(())
     }
 
-    pub fn update(&mut self, key: &str, value: bson::Document) -> Result<()> {
+    pub fn update(&mut self, key: &str, value: bson::Bson) -> Result<()> {
         if !self.contains(key) {
             return Err(Error {
                 code: ErrorCode::KeyNotExists,
@@ -187,7 +187,7 @@ impl Lsm {
         self.memtable_size = 0;
     }
 
-    pub fn get_memtable(&self) -> BTreeMap<String, bson::Document> {
+    pub fn get_memtable(&self) -> BTreeMap<String, bson::Bson> {
         self.memtable.lock().unwrap().clone()
     }
 

@@ -113,8 +113,8 @@ impl DustData {
     /// # Arguments
     /// - `key`: a key to search for
     /// # Returns
-    /// - `Some(bson::Document)` if value was found returns a bson document
-    pub fn get(&self, key: &str) -> Result<Option<bson::Document>> {
+    /// - `Result<Option<(bson::Bson)>>` if value was found returns a bson document
+    pub fn get(&self, key: &str) -> Result<Option<bson::Bson>> {
         self.lsm.get(key)
     }
 
@@ -122,8 +122,8 @@ impl DustData {
     /// # Arguments
     /// - `key`: a key.
     /// - `document`: a bson document to insert
-    pub fn insert(&mut self, key: &str, document: bson::Document) -> Result<()> {
-        self.lsm.insert(key, document)
+    pub fn insert(&mut self, key: &str, bson: bson::Bson) -> Result<()> {
+        self.lsm.insert(key, bson)
     }
 
     /// Delete a value with a key
@@ -137,8 +137,8 @@ impl DustData {
     /// # Arguments
     /// - `key`: a key to search for and update it.
     /// - `document`: the new document to replace the old one.
-    pub fn update(&mut self, key: &str, document: bson::Document) -> Result<()> {
-        self.lsm.update(key, document)
+    pub fn update(&mut self, key: &str, bson: bson::Bson) -> Result<()> {
+        self.lsm.update(key, bson)
     }
 
     /// Check if key exists.

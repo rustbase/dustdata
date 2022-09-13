@@ -10,7 +10,7 @@ pub trait Writer {
     /// # Returns
     /// - `Ok(String)` if the write was successful returns the offset
     /// - `Err(())` if the write failed
-    fn persist(&mut self, key: &str, value: bson::Document) -> Result<String, String> {
+    fn persist(&mut self, key: &str, value: bson::Bson) -> Result<String, String> {
         let temp_doc = bson::doc! {
             "_key": key,
             "_value": value,
