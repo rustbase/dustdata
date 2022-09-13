@@ -14,12 +14,13 @@ pub struct LsmConfig {
 
 /// A DustData configuration
 /// # Arguments
+/// * `verbose` - Whether or not to print verbose output
 /// * `path` - The path to the data directory
-/// * `cache_size` - The size of the cache (in bytes)
 /// * `lsm_config` - The LSM configuration
 #[derive(Clone)]
 pub struct DustDataConfig {
     pub path: String,
+    pub verbose: bool,
     pub lsm_config: LsmConfig,
 }
 
@@ -95,6 +96,7 @@ impl DustData {
         let path = path::Path::new(&configuration.path);
 
         let mut lsm = storage::lsm::Lsm::new(lsm::LsmConfig {
+            verbose: configuration.verbose,
             flush_threshold: parse_size(configuration.clone().lsm_config.flush_threshold),
             sstable_path: path.to_str().unwrap().to_string(),
         });

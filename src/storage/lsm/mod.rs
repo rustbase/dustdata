@@ -5,6 +5,7 @@ use std::path;
 use std::sync::{Arc, Mutex};
 
 use crate::bloom::BloomFilter;
+use crate::dd_println;
 use crate::dustdata::{Error, ErrorCode, Result};
 
 mod filter;
@@ -16,6 +17,7 @@ mod writer;
 pub struct LsmConfig {
     pub flush_threshold: usize,
     pub sstable_path: String,
+    pub verbose: bool,
 }
 
 #[derive(Clone)]
@@ -63,6 +65,11 @@ impl Lsm {
         let c_bloom = Arc::clone(&self.bloom_filter);
 
         ctrlc::set_handler(move || {
+            if c_config.verbose {
+                dd_println!("Ctrl-C detected.");
+                dd_println!("Flushing memtable to disk...");
+            }
+
             let memtable = c_mem.lock().unwrap();
             let segments =
                 sstable::Segment::from_tree(memtable.deref(), c_config.sstable_path.as_str());
@@ -164,6 +171,9 @@ impl Lsm {
     }
 
     pub fn flush(&mut self) {
+        if self.lsm_config.verbose {
+            dd_println!("Flushing memtable to disk...");
+        }
         let segment = sstable::Segment::from_tree(
             &self.get_memtable(),
             self.lsm_config.sstable_path.as_str(),
@@ -201,6 +211,10 @@ impl Drop for Lsm {
         let memtable = self.memtable.lock().unwrap();
 
         if memtable.len() > 0 {
+            if self.lsm_config.verbose {
+                dd_println!("Flushing memtable to disk due to drop...");
+            }
+
             let mut dense_index = self.dense_index.lock().unwrap();
 
             let segments = sstable::Segment::from_tree(
@@ -224,6 +238,8 @@ impl Drop for Lsm {
                 &self.lsm_config.sstable_path,
                 self.bloom_filter.lock().unwrap().deref(),
             );
+        } else if self.lsm_config.verbose {
+            dd_println!("No memtable to flush to disk...");
         }
     }
 }
