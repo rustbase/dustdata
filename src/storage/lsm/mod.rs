@@ -1,3 +1,4 @@
+use logs::Method;
 use std::collections::{BTreeMap, HashMap};
 use std::mem;
 use std::ops::Deref;
@@ -10,6 +11,7 @@ use crate::dustdata::{Error, ErrorCode, Result};
 
 mod filter;
 mod index;
+mod logs;
 mod sstable;
 mod writer;
 
@@ -27,6 +29,7 @@ pub struct Lsm {
     pub lsm_config: LsmConfig,
     pub dense_index: Arc<Mutex<HashMap<String, String>>>,
     pub bloom_filter: Arc<Mutex<BloomFilter>>,
+    pub logs: Arc<Mutex<logs::Logs>>,
 }
 
 impl Lsm {
@@ -49,11 +52,14 @@ impl Lsm {
             std::fs::create_dir_all(&config.sstable_path).unwrap();
         }
 
+        let logs = logs::Logs::new(config.clone().sstable_path);
+
         Lsm {
             memtable: Arc::new(Mutex::new(BTreeMap::new())),
             bloom_filter: Arc::new(Mutex::new(bloom_filter)),
             dense_index: Arc::new(Mutex::new(index)),
             lsm_config: config,
+            logs: Arc::new(Mutex::new(logs)),
             memtable_size: 0, // The current memtable size (in bytes)
         }
     }
@@ -67,29 +73,34 @@ impl Lsm {
         ctrlc::set_handler(move || {
             if c_config.verbose {
                 dd_println!("Ctrl-C detected.");
-                dd_println!("Flushing memtable to disk...");
             }
 
             let memtable = c_mem.lock().unwrap();
-            let segments =
-                sstable::Segment::from_tree(memtable.deref(), c_config.sstable_path.as_str());
 
-            for token in segments.1 {
-                c_den.lock().unwrap().insert(token.0, token.1);
+            if memtable.len() > 0 {
+                dd_println!("Flushing memtable to disk...");
+                let segments =
+                    sstable::Segment::from_tree(memtable.deref(), c_config.sstable_path.as_str());
+
+                for token in segments.1 {
+                    c_den.lock().unwrap().insert(token.0, token.1);
+                }
+
+                let dense_index = c_den.lock().unwrap();
+                let bloom_filter = c_bloom.lock().unwrap();
+
+                index::write_index(&c_config.sstable_path, dense_index.deref());
+
+                let mut keys = Vec::new();
+
+                for segment in dense_index.deref() {
+                    keys.push(segment.0.clone());
+                }
+
+                filter::write_filter(&c_config.sstable_path, bloom_filter.deref());
+            } else if c_config.verbose {
+                dd_println!("No data to flush.");
             }
-
-            let dense_index = c_den.lock().unwrap();
-            let bloom_filter = c_bloom.lock().unwrap();
-
-            index::write_index(&c_config.sstable_path, dense_index.deref());
-
-            let mut keys = Vec::new();
-
-            for segment in dense_index.deref() {
-                keys.push(segment.0.clone());
-            }
-
-            filter::write_filter(&c_config.sstable_path, bloom_filter.deref());
 
             std::process::exit(0);
         })
@@ -105,6 +116,10 @@ impl Lsm {
         }
 
         self.memtable_size += mem::size_of_val(&value);
+        self.logs
+            .lock()
+            .unwrap()
+            .write(Method::Insert(key.to_string(), value.clone()));
         self.memtable.lock().unwrap().insert(key.to_string(), value);
         self.bloom_filter.lock().unwrap().insert(key);
 
@@ -145,6 +160,10 @@ impl Lsm {
             });
         }
 
+        self.logs
+            .lock()
+            .unwrap()
+            .write(Method::Delete(key.to_string()));
         if self.memtable.lock().unwrap().contains_key(&key.to_string()) {
             self.memtable.lock().unwrap().remove(&key.to_string());
         } else {
@@ -164,8 +183,29 @@ impl Lsm {
             });
         }
 
-        self.delete(key).unwrap();
-        self.insert(key, value).unwrap();
+        let mut memtable = self.memtable.lock().unwrap();
+
+        self.logs
+            .lock()
+            .unwrap()
+            .write(Method::Update(key.to_string(), value.clone()));
+
+        // Delete the old value from the bloom filter
+        self.bloom_filter.lock().unwrap().delete(key);
+
+        if let std::collections::btree_map::Entry::Occupied(mut e) = memtable.entry(key.to_string())
+        {
+            e.insert(value);
+        } else {
+            let mut dense_index = self.dense_index.lock().unwrap();
+
+            // Delete the old value from the dense index
+            dense_index.remove(&key.to_string());
+        }
+
+        self.bloom_filter.lock().unwrap().insert(key);
+
+        self.update_index();
 
         Ok(())
     }
