@@ -52,9 +52,7 @@ impl Lsm {
             std::fs::create_dir_all(&config.sstable_path).unwrap();
         }
 
-        let mut logs = logs::Logs::new(config.clone().sstable_path);
-
-        logs.read(Some(0));
+        let logs = logs::Logs::new(config.clone().sstable_path);
 
         Lsm {
             memtable: Arc::new(Mutex::new(BTreeMap::new())),
@@ -185,12 +183,29 @@ impl Lsm {
             });
         }
 
+        let mut memtable = self.memtable.lock().unwrap();
+
         self.logs
             .lock()
             .unwrap()
             .write(Method::Update(key.to_string(), value.clone()));
-        self.delete(key).unwrap();
-        self.insert(key, value).unwrap();
+
+        // Delete the old value from the bloom filter
+        self.bloom_filter.lock().unwrap().delete(key);
+
+        if let std::collections::btree_map::Entry::Occupied(mut e) = memtable.entry(key.to_string())
+        {
+            e.insert(value);
+        } else {
+            let mut dense_index = self.dense_index.lock().unwrap();
+
+            // Delete the old value from the dense index
+            dense_index.remove(&key.to_string());
+        }
+
+        self.bloom_filter.lock().unwrap().insert(key);
+
+        self.update_index();
 
         Ok(())
     }

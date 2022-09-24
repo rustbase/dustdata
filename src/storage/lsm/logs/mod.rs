@@ -46,7 +46,6 @@ pub fn find_file_by_index(path: PathBuf, index: i32) -> Option<PathBuf> {
 pub struct Logs {
     file: fs::File,
     path: PathBuf,
-    index: i32,
 }
 
 impl Logs {
@@ -54,7 +53,7 @@ impl Logs {
         let folder = Path::new(&path).join("logs");
 
         if !folder.exists() {
-            fs::create_dir_all(&path).unwrap();
+            fs::create_dir_all(folder.clone()).unwrap();
         }
 
         let index = get_index(folder.clone());
@@ -62,15 +61,12 @@ impl Logs {
 
         let file = fs::OpenOptions::new()
             .create(true)
+            .read(true)
             .append(true)
             .open(path)
             .unwrap();
 
-        Self {
-            file,
-            path: folder,
-            index,
-        }
+        Self { file, path: folder }
     }
 
     pub fn write(&mut self, method: Method) {
@@ -109,7 +105,7 @@ impl Logs {
         self.file.write_all(&bytes).unwrap();
     }
 
-    pub fn read(&mut self, log_index: Option<i32>) {
+    pub fn read(&mut self, log_index: Option<i32>) -> Vec<Method> {
         let mut bytes = Vec::new();
 
         if let Some(log_index) = log_index {
@@ -130,9 +126,26 @@ impl Logs {
             }
         }
 
+        let mut methods = Vec::new();
+
         for segment in segments {
             let doc: bson::Document = bson::from_slice(&segment).unwrap();
-            println!("{:?}", doc);
+
+            let method = doc.get_str("method").unwrap();
+            let key = doc.get_str("key").unwrap().to_string();
+            let value = doc.get("value").unwrap().clone();
+
+            let method = match method {
+                "insert" => Method::Insert(key, value),
+                "delete" => Method::Delete(key),
+                "update" => Method::Update(key, value),
+
+                _ => panic!("Invalid method"),
+            };
+
+            methods.push(method);
         }
+
+        methods
     }
 }
