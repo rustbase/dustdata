@@ -77,4 +77,31 @@ mod dustdata_tests {
 
         dd.delete("update_doc").unwrap(); // delete the test document
     }
+
+    #[test]
+    fn reading_on_sstable() {
+        let config = get_default_config();
+
+        let mut dd = initialize(config);
+
+        dd.insert(
+            "read_sstable",
+            bson::bson!({
+                "test": "test"
+            }),
+        )
+        .unwrap();
+
+        // flush the sstable
+        dd.lsm.flush();
+
+        let get = dd.get("read_sstable").unwrap().unwrap();
+        let get = get.as_document().unwrap();
+
+        let get = get.get("test").unwrap().as_str().unwrap();
+
+        assert_eq!(get, "test");
+
+        dd.delete("read_sstable").unwrap(); // delete the test document
+    }
 }
