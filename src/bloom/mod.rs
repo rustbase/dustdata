@@ -1,6 +1,8 @@
 // https://www.youtube.com/watch?v=uoITg1iUj7A
 // Bloom filter: https://en.wikipedia.org/wiki/Bloom_filter
 
+use farmhash::hash32_with_seed;
+
 fn num_bits(size: i32, fp_rate: f64) -> i32 {
     let num = -1.0f64 * size as f64 * fp_rate.ln();
     let den = 2.0f64.ln().powf(2.0);
@@ -29,8 +31,8 @@ impl BloomFilter {
 
     pub fn insert(&mut self, value: &str) {
         for i in 0..self.hashes {
-            let index = fasthash::murmur3::hash32_with_seed(value, i as u32)
-                % (self.bitvec.len() as u32 * 8);
+            let index =
+                hash32_with_seed(value.as_bytes(), i as u32) % (self.bitvec.len() as u32 * 8);
             let pos = index as usize;
             self.bitvec[pos / 8] |= 1 << (pos % 8);
         }
@@ -38,8 +40,8 @@ impl BloomFilter {
 
     pub fn contains(&self, value: &str) -> bool {
         for i in 0..self.hashes {
-            let index = fasthash::murmur3::hash32_with_seed(value, i as u32)
-                % (self.bitvec.len() as u32 * 8);
+            let index =
+                hash32_with_seed(value.as_bytes(), i as u32) % (self.bitvec.len() as u32 * 8);
             let pos = index as usize;
             if (1 << (pos % 8)) & self.bitvec[pos / 8] == 0 {
                 return false;
@@ -55,8 +57,8 @@ impl BloomFilter {
 
     pub fn delete(&mut self, value: &str) {
         for i in 0..self.hashes {
-            let index = fasthash::murmur3::hash32_with_seed(value, i as u32)
-                % (self.bitvec.len() as u32 * 8);
+            let index =
+                hash32_with_seed(value.as_bytes(), i as u32) % (self.bitvec.len() as u32 * 8);
             let pos = index as usize;
             self.bitvec[pos / 8] &= !(1 << (pos % 8));
         }
