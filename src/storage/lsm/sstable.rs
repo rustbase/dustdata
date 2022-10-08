@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 use std::fs;
-use std::os::unix::prelude::FileExt;
+use std::io::{Read, Seek, SeekFrom};
 use std::path;
 
 use bson::Document;
@@ -104,13 +104,15 @@ impl Segment {
             return None;
         }
 
-        let file = fs::File::open(file_path).unwrap();
+        let mut file = fs::File::open(file_path).unwrap();
 
         let mut document_length = [0; 1];
-        file.read_at(&mut document_length, offset).unwrap();
+        file.seek(SeekFrom::Start(offset)).unwrap();
+        file.read_exact(&mut document_length).unwrap();
 
         let mut document_bytes = vec![0; document_length[0] as usize];
-        file.read_at(&mut document_bytes, offset).unwrap();
+        file.seek(SeekFrom::Start(offset)).unwrap();
+        file.read_exact(&mut document_bytes).unwrap();
 
         let document: Document = bson::from_slice(&document_bytes).unwrap();
 
