@@ -12,8 +12,8 @@ pub trait Writer {
     /// - `Err(())` if the write failed
     fn persist(&mut self, key: &str, value: bson::Bson) -> Result<String, String> {
         let temp_doc = bson::doc! {
-            "_key": key,
-            "_value": value,
+            "_k": key,
+            "_v": value,
         };
 
         let mut file = self.file();

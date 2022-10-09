@@ -2,7 +2,7 @@
 macro_rules! dd_println {
     () => (print!("\n"));
     ($($arg:tt)*) => ({
-        print!("[DustData]: ");
+        print!("[DustData] ");
         println!($($arg)*);
     })
 }

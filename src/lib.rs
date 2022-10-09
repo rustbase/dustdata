@@ -20,7 +20,7 @@ mod dustdata_tests {
 
     fn get_default_config() -> DustDataConfig {
         DustDataConfig {
-            verbose: false,
+            verbose: true,
             path: "./test_data".to_string(),
             lsm_config: LsmConfig {
                 flush_threshold: Size::Megabytes(128),

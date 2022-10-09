@@ -250,9 +250,11 @@ impl Drop for Lsm {
     fn drop(&mut self) {
         let memtable = self.memtable.lock().unwrap();
 
+        dd_println!("LSM is being dropped.");
+
         if memtable.len() > 0 {
             if self.lsm_config.verbose {
-                dd_println!("Flushing memtable to disk due to drop...");
+                dd_println!("Flushing memtable to disk.");
             }
 
             let mut dense_index = self.dense_index.lock().unwrap();
@@ -279,7 +281,7 @@ impl Drop for Lsm {
                 self.bloom_filter.lock().unwrap().deref(),
             );
         } else if self.lsm_config.verbose {
-            dd_println!("No memtable to flush to disk...");
+            dd_println!("No memtable to flush to disk.");
         }
     }
 }
