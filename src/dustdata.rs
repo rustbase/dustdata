@@ -147,6 +147,10 @@ impl DustData {
     pub fn contains(&mut self, key: &str) -> bool {
         self.lsm.contains(key)
     }
+
+    pub fn list_keys(&self) -> Result<Vec<String>> {
+        Ok(self.lsm.list_keys())
+    }
 }
 
 #[cfg(test)]
