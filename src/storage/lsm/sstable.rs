@@ -116,7 +116,7 @@ impl Segment {
 
         let document: Document = bson::from_slice(&document_bytes).unwrap();
 
-        Some(document.get("_value").unwrap().clone())
+        Some(document.get("_v").unwrap().clone())
     }
 
     pub fn write(&mut self, key: &str, value: bson::Bson) -> (String, String) {

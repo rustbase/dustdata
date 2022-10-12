@@ -244,15 +244,31 @@ impl Lsm {
         let index = self.dense_index.lock().unwrap().clone();
         index::write_index(&self.lsm_config.sstable_path, &index);
     }
+
+    pub fn list_keys(&self) -> Vec<String> {
+        let mut keys = Vec::new();
+
+        for key in self.memtable.lock().unwrap().keys() {
+            keys.push(key.clone());
+        }
+
+        for key in self.dense_index.lock().unwrap().keys() {
+            keys.push(key.clone());
+        }
+
+        keys
+    }
 }
 
 impl Drop for Lsm {
     fn drop(&mut self) {
         let memtable = self.memtable.lock().unwrap();
 
+        dd_println!("LSM is being dropped.");
+
         if memtable.len() > 0 {
             if self.lsm_config.verbose {
-                dd_println!("Flushing memtable to disk due to drop...");
+                dd_println!("Flushing memtable to disk.");
             }
 
             let mut dense_index = self.dense_index.lock().unwrap();
@@ -279,7 +295,7 @@ impl Drop for Lsm {
                 self.bloom_filter.lock().unwrap().deref(),
             );
         } else if self.lsm_config.verbose {
-            dd_println!("No memtable to flush to disk...");
+            dd_println!("No memtable to flush to disk.");
         }
     }
 }
