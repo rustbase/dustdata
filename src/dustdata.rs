@@ -41,17 +41,70 @@ impl Add for Size {
     type Output = Size;
 
     fn add(self, rhs: Self) -> Self::Output {
+        fn calc(a: usize, b: usize) -> Size {
+            let mut bytes = a + b;
+
+            let mut gigabytes = 0;
+            let mut megabytes = 0;
+            let mut kilobytes = 0;
+
+            while bytes >= 1024 * 1024 * 1024 {
+                gigabytes += 1;
+                bytes -= 1024 * 1024 * 1024;
+            }
+
+            while bytes >= 1024 * 1024 {
+                megabytes += 1;
+                bytes -= 1024 * 1024;
+            }
+
+            while bytes >= 1024 {
+                kilobytes += 1;
+                bytes -= 1024;
+            }
+
+            if gigabytes > 0 {
+                Size::Gigabytes(gigabytes)
+            } else if megabytes > 0 {
+                Size::Megabytes(megabytes)
+            } else if kilobytes > 0 {
+                Size::Kilobytes(kilobytes)
+            } else {
+                Size::Bytes(bytes)
+            }
+        }
+
         match (self, rhs) {
-            (Size::Bytes(a), Size::Bytes(b)) => Size::Bytes(a + b),
-            (Size::Kilobytes(a), Size::Kilobytes(b)) => Size::Kilobytes(a + b),
-            (Size::Megabytes(a), Size::Megabytes(b)) => Size::Megabytes(a + b),
-            (Size::Gigabytes(a), Size::Gigabytes(b)) => Size::Gigabytes(a + b),
-            _ => panic!("Cannot add two different sizes"),
+            (Size::Bytes(a), Size::Bytes(b)) => calc(a, b),
+            (Size::Bytes(a), Size::Kilobytes(b)) => calc(a, b * 1024),
+            (Size::Bytes(a), Size::Megabytes(b)) => calc(a, b * 1024 * 1024),
+            (Size::Bytes(a), Size::Gigabytes(b)) => calc(a, b * 1024 * 1024 * 1024),
+
+            (Size::Kilobytes(a), Size::Bytes(b)) => calc(a * 1024, b * 1024),
+            (Size::Kilobytes(a), Size::Kilobytes(b)) => calc(a * 1024, b * 1024),
+            (Size::Kilobytes(a), Size::Megabytes(b)) => calc(a * 1024, b * 1024 * 1024),
+            (Size::Kilobytes(a), Size::Gigabytes(b)) => calc(a * 1024, b * 1024 * 1024 * 1024),
+
+            (Size::Megabytes(a), Size::Bytes(b)) => calc(a * 1024 * 1024, b),
+            (Size::Megabytes(a), Size::Kilobytes(b)) => calc(a * 1024 * 1024, b * 1024),
+            (Size::Megabytes(a), Size::Megabytes(b)) => calc(a * 1024 * 1024, b * 1024 * 1024),
+            (Size::Megabytes(a), Size::Gigabytes(b)) => {
+                calc(a * 1024 * 1024, b * 1024 * 1024 * 1024)
+            }
+
+            (Size::Gigabytes(a), Size::Bytes(b)) => calc(a * 1024 * 1024 * 1024, b),
+            (Size::Gigabytes(a), Size::Kilobytes(b)) => calc(a * 1024 * 1024 * 1024, b * 1024),
+            (Size::Gigabytes(a), Size::Megabytes(b)) => {
+                calc(a * 1024 * 1024 * 1024, b * 1024 * 1024)
+            }
+            (Size::Gigabytes(a), Size::Gigabytes(b)) => {
+                calc(a * 1024 * 1024 * 1024, b * 1024 * 1024 * 1024)
+            }
         }
     }
 }
 
-pub fn parse_size(size: Size) -> usize {
+pub fn size_to_usize(size: Size) -> usize {
     match size {
         Size::Bytes(bytes) => bytes,
         Size::Kilobytes(kilobytes) => kilobytes * 1024,
@@ -97,7 +150,7 @@ impl DustData {
 
         let mut lsm = storage::lsm::Lsm::new(lsm::LsmConfig {
             verbose: configuration.verbose,
-            flush_threshold: parse_size(configuration.clone().lsm_config.flush_threshold),
+            flush_threshold: size_to_usize(configuration.clone().lsm_config.flush_threshold),
             sstable_path: path.to_str().unwrap().to_string(),
         });
 
@@ -161,31 +214,27 @@ mod size_tests {
     fn add_impl_bytes() {
         let size = Size::Bytes(1);
         let size2 = Size::Bytes(2);
-        let size3 = parse_size(size + size2);
-        assert_eq!(size3, parse_size(Size::Bytes(3)));
+        assert_eq!(size + size2, Size::Bytes(3));
     }
 
     #[test]
     fn add_impl_gb() {
         let size = Size::Gigabytes(1);
         let size2 = Size::Gigabytes(2);
-        let size3 = parse_size(size + size2);
-        assert_eq!(size3, parse_size(Size::Gigabytes(3)));
+        assert_eq!(size + size2, Size::Gigabytes(3));
     }
 
     #[test]
     fn add_impl_mb() {
         let size = Size::Megabytes(1);
         let size2 = Size::Megabytes(2);
-        let size3 = parse_size(size + size2);
-        assert_eq!(size3, parse_size(Size::Megabytes(3)));
+        assert_eq!(size + size2, Size::Megabytes(3));
     }
 
     #[test]
     fn add_impl_kb() {
         let size = Size::Kilobytes(1);
         let size2 = Size::Kilobytes(2);
-        let size3 = parse_size(size + size2);
-        assert_eq!(size3, parse_size(Size::Kilobytes(3)));
+        assert_eq!(size + size2, Size::Kilobytes(3));
     }
 }
