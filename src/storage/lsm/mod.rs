@@ -244,6 +244,20 @@ impl Lsm {
         let index = self.dense_index.lock().unwrap().clone();
         index::write_index(&self.lsm_config.sstable_path, &index);
     }
+
+    pub fn list_keys(&self) -> Vec<String> {
+        let mut keys = Vec::new();
+
+        for key in self.memtable.lock().unwrap().keys() {
+            keys.push(key.clone());
+        }
+
+        for key in self.dense_index.lock().unwrap().keys() {
+            keys.push(key.clone());
+        }
+
+        keys
+    }
 }
 
 impl Drop for Lsm {

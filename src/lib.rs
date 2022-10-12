@@ -68,12 +68,15 @@ mod dustdata_tests {
         )
         .unwrap();
 
+        let ls = dd.list_keys().unwrap();
+
         let get = dd.get("update_doc").unwrap().unwrap();
         let get = get.as_document().unwrap();
 
         let get = get.get("test").unwrap().as_str().unwrap();
 
         assert_eq!(get, "test2");
+        assert_eq!(ls, vec!["update_doc".to_string()]);
 
         dd.delete("update_doc").unwrap(); // delete the test document
     }
@@ -95,12 +98,15 @@ mod dustdata_tests {
         // flush the sstable
         dd.lsm.flush();
 
+        let ls = dd.list_keys().unwrap();
+
         let get = dd.get("read_sstable").unwrap().unwrap();
         let get = get.as_document().unwrap();
 
         let get = get.get("test").unwrap().as_str().unwrap();
 
         assert_eq!(get, "test");
+        assert_eq!(ls, vec!["read_sstable".to_string()]);
 
         dd.delete("read_sstable").unwrap(); // delete the test document
     }
