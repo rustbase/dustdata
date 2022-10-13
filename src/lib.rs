@@ -3,7 +3,10 @@ mod dustdata;
 mod storage;
 mod utils;
 
-pub use self::{dustdata::DustData, dustdata::DustDataConfig, dustdata::LsmConfig, dustdata::Size};
+pub use self::{
+    dustdata::DustData, dustdata::DustDataConfig, dustdata::Error, dustdata::ErrorCode,
+    dustdata::LsmConfig, dustdata::Result, dustdata::Size,
+};
 
 /// Initialize the database
 /// # Arguments
