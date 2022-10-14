@@ -1,5 +1,5 @@
 use logs::Method;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::mem;
 use std::ops::Deref;
 use std::path;
@@ -27,7 +27,7 @@ pub struct Lsm {
     pub memtable: Arc<Mutex<BTreeMap<String, bson::Bson>>>,
     pub memtable_size: usize,
     pub lsm_config: LsmConfig,
-    pub dense_index: Arc<Mutex<BTreeMap<String, String>>>,
+    pub dense_index: Arc<Mutex<HashMap<String, String>>>,
     pub bloom_filter: Arc<Mutex<BloomFilter>>,
     pub logs: Arc<Mutex<logs::Logs>>,
 }
@@ -39,7 +39,7 @@ impl Lsm {
         let index = if index::check_if_index_exists(&config.sstable_path) {
             index::read_index(&config.sstable_path)
         } else {
-            BTreeMap::new()
+            HashMap::new()
         };
 
         let bloom_filter = if filter::check_if_filter_exists(&config.sstable_path) {

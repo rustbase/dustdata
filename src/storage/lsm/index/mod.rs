@@ -1,5 +1,5 @@
 use std::{
-    collections::BTreeMap,
+    collections::HashMap,
     fs,
     io::{Read, Write},
     path,
@@ -11,7 +11,7 @@ pub fn check_if_index_exists(path: &str) -> bool {
     _path.exists()
 }
 
-pub fn write_index(path: &str, index: &BTreeMap<String, String>) {
+pub fn write_index(path: &str, index: &HashMap<String, String>) {
     let _path = path::Path::new(path).join("index");
 
     if index.is_empty() {
@@ -31,14 +31,14 @@ pub fn write_index(path: &str, index: &BTreeMap<String, String>) {
     file.sync_all().unwrap();
 }
 
-pub fn read_index(path: &str) -> BTreeMap<String, String> {
+pub fn read_index(path: &str) -> HashMap<String, String> {
     let _path = path::Path::new(path).join("index");
 
     let mut file = fs::File::open(_path).unwrap();
     let mut bytes_to_read: Vec<u8> = Vec::new();
     file.read_to_end(&mut bytes_to_read).unwrap();
 
-    let mut index: BTreeMap<String, String> = BTreeMap::new();
+    let mut index: HashMap<String, String> = HashMap::new();
     let index_bson: bson::Document = bson::from_slice(&bytes_to_read).unwrap();
 
     for doc in index_bson {
