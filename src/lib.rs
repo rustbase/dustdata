@@ -79,7 +79,7 @@ mod dustdata_tests {
         let get = get.get("test").unwrap().as_str().unwrap();
 
         assert_eq!(get, "test2");
-        assert_eq!(ls, vec!["update_doc".to_string()]);
+        assert!(ls.contains(&"update_doc".to_string()));
 
         dd.delete("update_doc").unwrap(); // delete the test document
     }
@@ -109,7 +109,7 @@ mod dustdata_tests {
         let get = get.get("test").unwrap().as_str().unwrap();
 
         assert_eq!(get, "test");
-        assert_eq!(ls, vec!["read_sstable".to_string()]);
+        assert!(ls.contains(&"read_sstable".to_string()));
 
         dd.delete("read_sstable").unwrap(); // delete the test document
     }
