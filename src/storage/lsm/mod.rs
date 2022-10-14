@@ -76,7 +76,7 @@ impl Lsm {
             }
 
             let memtable = c_mem.lock().unwrap();
-            let dense_index = c_den.lock().unwrap();
+            let mut dense_index = c_den.lock().unwrap();
 
             if memtable.len() > 0 {
                 if c_config.verbose {
@@ -87,7 +87,7 @@ impl Lsm {
                     sstable::Segment::from_tree(memtable.deref(), c_config.sstable_path.as_str());
 
                 for token in segments.1 {
-                    c_den.lock().unwrap().insert(token.0, token.1);
+                    dense_index.insert(token.0, token.1);
                 }
 
                 let mut keys = Vec::new();
