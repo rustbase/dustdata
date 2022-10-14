@@ -214,14 +214,30 @@ impl Lsm {
         if self.lsm_config.verbose {
             dd_println!("Flushing memtable to disk...");
         }
-        let segment = sstable::Segment::from_tree(
+
+        let mut dense_index = self.dense_index.lock().unwrap();
+
+        let segments = sstable::Segment::from_tree(
             &self.get_memtable(),
             self.lsm_config.sstable_path.as_str(),
         );
 
-        for token in segment.1 {
-            self.dense_index.lock().unwrap().insert(token.0, token.1);
+        for token in segments.1 {
+            dense_index.insert(token.0, token.1);
         }
+
+        index::write_index(&self.lsm_config.sstable_path, dense_index.deref());
+
+        let mut keys = Vec::new();
+
+        for segment in dense_index.deref() {
+            keys.push(segment.0.clone());
+        }
+
+        filter::write_filter(
+            &self.lsm_config.sstable_path,
+            self.bloom_filter.lock().unwrap().deref(),
+        );
 
         self.memtable.lock().unwrap().clear();
         self.memtable_size = 0;
