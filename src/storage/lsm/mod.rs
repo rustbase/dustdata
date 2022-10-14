@@ -76,6 +76,8 @@ impl Lsm {
             }
 
             let memtable = c_mem.lock().unwrap();
+            let dense_index = c_den.lock().unwrap();
+            let bloom_filter = c_bloom.lock().unwrap();
 
             if memtable.len() > 0 {
                 dd_println!("Flushing memtable to disk...");
@@ -86,21 +88,17 @@ impl Lsm {
                     c_den.lock().unwrap().insert(token.0, token.1);
                 }
 
-                let dense_index = c_den.lock().unwrap();
-                let bloom_filter = c_bloom.lock().unwrap();
-
-                index::write_index(&c_config.sstable_path, dense_index.deref());
-
                 let mut keys = Vec::new();
 
                 for segment in dense_index.deref() {
                     keys.push(segment.0.clone());
                 }
-
-                filter::write_filter(&c_config.sstable_path, bloom_filter.deref());
             } else if c_config.verbose {
                 dd_println!("No data to flush.");
             }
+
+            index::write_index(&c_config.sstable_path, dense_index.deref());
+            filter::write_filter(&c_config.sstable_path, bloom_filter.deref());
 
             std::process::exit(0);
         })
@@ -279,15 +277,16 @@ impl Lsm {
 impl Drop for Lsm {
     fn drop(&mut self) {
         let memtable = self.memtable.lock().unwrap();
+        let mut dense_index = self.dense_index.lock().unwrap();
 
-        dd_println!("LSM is being dropped.");
+        if self.lsm_config.verbose {
+            dd_println!("LSM is being dropped.");
+        }
 
         if memtable.len() > 0 {
             if self.lsm_config.verbose {
                 dd_println!("Flushing memtable to disk.");
             }
-
-            let mut dense_index = self.dense_index.lock().unwrap();
 
             let segments = sstable::Segment::from_tree(
                 memtable.deref(),
@@ -298,20 +297,20 @@ impl Drop for Lsm {
                 dense_index.insert(token.0, token.1);
             }
 
-            index::write_index(&self.lsm_config.sstable_path, dense_index.deref());
-
             let mut keys = Vec::new();
 
             for segment in dense_index.deref() {
                 keys.push(segment.0.clone());
             }
-
-            filter::write_filter(
-                &self.lsm_config.sstable_path,
-                self.bloom_filter.lock().unwrap().deref(),
-            );
         } else if self.lsm_config.verbose {
             dd_println!("No memtable to flush to disk.");
         }
+
+        index::write_index(&self.lsm_config.sstable_path, dense_index.deref());
+
+        filter::write_filter(
+            &self.lsm_config.sstable_path,
+            self.bloom_filter.lock().unwrap().deref(),
+        );
     }
 }
