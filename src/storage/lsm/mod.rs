@@ -77,6 +77,7 @@ impl Lsm {
 
             let memtable = c_mem.lock().unwrap();
             let dense_index = c_den.lock().unwrap();
+            let bloom_filter = c_bloom.lock().unwrap();
 
             if memtable.len() > 0 {
                 dd_println!("Flushing memtable to disk...");
@@ -87,24 +88,17 @@ impl Lsm {
                     c_den.lock().unwrap().insert(token.0, token.1);
                 }
 
-                let bloom_filter = c_bloom.lock().unwrap();
-
-                index::write_index(&c_config.sstable_path, dense_index.deref());
-
                 let mut keys = Vec::new();
 
                 for segment in dense_index.deref() {
                     keys.push(segment.0.clone());
                 }
-
-                filter::write_filter(&c_config.sstable_path, bloom_filter.deref());
             } else if c_config.verbose {
                 dd_println!("No data to flush.");
             }
 
             index::write_index(&c_config.sstable_path, dense_index.deref());
-
-            filter::write_filter(&c_config.sstable_path, c_bloom.lock().unwrap().deref());
+            filter::write_filter(&c_config.sstable_path, bloom_filter.deref());
 
             std::process::exit(0);
         })
