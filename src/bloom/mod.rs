@@ -1,25 +1,25 @@
 // https://www.youtube.com/watch?v=uoITg1iUj7A
 // Bloom filter: https://en.wikipedia.org/wiki/Bloom_filter
 
-use farmhash::hash32_with_seed;
+use farmhash::hash64_with_seed;
 
-fn num_bits(size: i32, fp_rate: f64) -> i32 {
+fn num_bits(size: i64, fp_rate: f64) -> i64 {
     let num = -1.0f64 * size as f64 * fp_rate.ln();
     let den = 2.0f64.ln().powf(2.0);
-    (num / den).ceil() as i32
+    (num / den).ceil() as i64
 }
 
-fn num_hashes(m: i32, n: i32) -> i32 {
-    ((m as f64 / n as f64) * 2.0f64).ceil() as i32
+fn num_hashes(m: i64, n: i64) -> i64 {
+    ((m as f64 / n as f64) * 2.0f64).ceil() as i64
 }
 
 pub struct BloomFilter {
     pub bitvec: Vec<u8>,
-    pub hashes: i32,
+    pub hashes: i64,
 }
 
 impl BloomFilter {
-    pub fn new(fp_rate: f64, size: i32) -> Self {
+    pub fn new(fp_rate: f64, size: i64) -> Self {
         let m = num_bits(size, fp_rate);
         let k = num_hashes(m, size);
 
@@ -32,7 +32,7 @@ impl BloomFilter {
     pub fn insert(&mut self, value: &str) {
         for i in 0..self.hashes {
             let index =
-                hash32_with_seed(value.as_bytes(), i as u32) % (self.bitvec.len() as u32 * 8);
+                hash64_with_seed(value.as_bytes(), i as u64) % (self.bitvec.len() as u64 * 8);
             let pos = index as usize;
             self.bitvec[pos / 8] |= 1 << (pos % 8);
         }
@@ -41,7 +41,7 @@ impl BloomFilter {
     pub fn contains(&self, value: &str) -> bool {
         for i in 0..self.hashes {
             let index =
-                hash32_with_seed(value.as_bytes(), i as u32) % (self.bitvec.len() as u32 * 8);
+                hash64_with_seed(value.as_bytes(), i as u64) % (self.bitvec.len() as u64 * 8);
             let pos = index as usize;
             if (1 << (pos % 8)) & self.bitvec[pos / 8] == 0 {
                 return false;
@@ -58,7 +58,7 @@ impl BloomFilter {
     pub fn delete(&mut self, value: &str) {
         for i in 0..self.hashes {
             let index =
-                hash32_with_seed(value.as_bytes(), i as u32) % (self.bitvec.len() as u32 * 8);
+                hash64_with_seed(value.as_bytes(), i as u64) % (self.bitvec.len() as u64 * 8);
             let pos = index as usize;
             self.bitvec[pos / 8] &= !(1 << (pos % 8));
         }
@@ -68,7 +68,7 @@ impl BloomFilter {
         &self.bitvec
     }
 
-    pub fn get_hashes(&self) -> i32 {
+    pub fn get_hashes(&self) -> i64 {
         self.hashes
     }
 }
