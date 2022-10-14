@@ -42,7 +42,7 @@ pub fn read_filter(path: &str) -> BloomFilter {
     let doc: Document = bson::from_slice(&bytes_to_read).unwrap();
 
     let bitvec_comp = doc.get("b").unwrap().as_str().unwrap().to_string();
-    let hashes = doc.get("h").unwrap().as_i32().unwrap();
+    let hashes = doc.get("h").unwrap().as_i64().unwrap();
 
     let bitvec_comp_hex = hex::decode(bitvec_comp).unwrap();
 
