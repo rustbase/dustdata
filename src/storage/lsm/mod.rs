@@ -131,8 +131,6 @@ impl Lsm {
             self.flush();
         }
 
-        self.update_index();
-
         Ok(())
     }
 
@@ -174,6 +172,8 @@ impl Lsm {
 
         if memtable.contains_key(&key.to_string()) {
             memtable.remove(&key.to_string());
+
+            drop(memtable);
         } else {
             self.dense_index.lock().unwrap().remove(&key.to_string());
         }
@@ -209,10 +209,10 @@ impl Lsm {
         drop(dense_index);
 
         memtable.insert(key.to_string(), value);
+        drop(memtable);
 
         bloom_filter.insert(key);
-
-        self.update_index();
+        drop(bloom_filter);
 
         Ok(())
     }
@@ -240,6 +240,8 @@ impl Lsm {
         for segment in dense_index.deref() {
             keys.push(segment.0.clone());
         }
+
+        drop(dense_index);
 
         filter::write_filter(
             &self.lsm_config.sstable_path,
