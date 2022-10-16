@@ -37,6 +37,7 @@ mod dustdata_tests {
 
         let mut dd = initialize(config);
 
+        let now = std::time::SystemTime::now();
         dd.insert(
             "insert_doc",
             bson::bson!({
@@ -44,8 +45,11 @@ mod dustdata_tests {
             }),
         )
         .unwrap();
+        println!("Insert took: {:?}", now.elapsed().unwrap());
 
+        let now = std::time::SystemTime::now();
         assert!(dd.get("insert_doc").unwrap().is_some());
+        println!("Get took: {:?}", now.elapsed().unwrap());
 
         dd.delete("insert_doc").unwrap(); // delete the test document
     }
@@ -63,6 +67,7 @@ mod dustdata_tests {
         )
         .unwrap();
 
+        let now = std::time::SystemTime::now();
         dd.update(
             "update_doc",
             bson::bson! ({
@@ -70,6 +75,7 @@ mod dustdata_tests {
             }),
         )
         .unwrap();
+        println!("Update took: {:?}", now.elapsed().unwrap());
 
         let ls = dd.list_keys().unwrap();
 
@@ -103,7 +109,9 @@ mod dustdata_tests {
 
         let ls = dd.list_keys().unwrap();
 
+        let now = std::time::SystemTime::now();
         let get = dd.get("read_sstable").unwrap().unwrap();
+        println!("SSTable Get took: {:?}", now.elapsed().unwrap());
         let get = get.as_document().unwrap();
 
         let get = get.get("test").unwrap().as_str().unwrap();

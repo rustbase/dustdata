@@ -160,12 +160,14 @@ impl Lsm {
             });
         }
 
+        let mut memtable = self.memtable.lock().unwrap();
+
         self.logs
             .lock()
             .unwrap()
             .write(Method::Delete(key.to_string()));
-        if self.memtable.lock().unwrap().contains_key(&key.to_string()) {
-            self.memtable.lock().unwrap().remove(&key.to_string());
+        if memtable.contains_key(&key.to_string()) {
+            memtable.remove(&key.to_string());
         } else {
             self.dense_index.lock().unwrap().remove(&key.to_string());
         }
@@ -184,6 +186,7 @@ impl Lsm {
         }
 
         let mut memtable = self.memtable.lock().unwrap();
+        let mut bloom_filter = self.bloom_filter.lock().unwrap();
 
         self.logs
             .lock()
@@ -191,7 +194,7 @@ impl Lsm {
             .write(Method::Update(key.to_string(), value.clone()));
 
         // Delete the old value from the bloom filter
-        self.bloom_filter.lock().unwrap().delete(key);
+        bloom_filter.delete(key);
 
         if let std::collections::btree_map::Entry::Occupied(mut e) = memtable.entry(key.to_string())
         {
@@ -203,7 +206,7 @@ impl Lsm {
             dense_index.remove(&key.to_string());
         }
 
-        self.bloom_filter.lock().unwrap().insert(key);
+        bloom_filter.insert(key);
 
         self.update_index();
 
