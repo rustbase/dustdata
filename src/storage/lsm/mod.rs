@@ -116,10 +116,14 @@ impl Lsm {
         }
 
         self.memtable_size += mem::size_of_val(&value);
-        self.logs
-            .lock()
-            .unwrap()
-            .write(Method::Insert(key.to_string(), value.clone()));
+
+        let c_key = key.to_string();
+        let c_value = value.clone();
+        let logs = Arc::clone(&self.logs);
+        std::thread::spawn(move || {
+            logs.lock().unwrap().write(Method::Insert(c_key, c_value));
+        });
+
         self.memtable.lock().unwrap().insert(key.to_string(), value);
         self.bloom_filter.lock().unwrap().insert(key);
 
@@ -162,10 +166,12 @@ impl Lsm {
 
         let mut memtable = self.memtable.lock().unwrap();
 
-        self.logs
-            .lock()
-            .unwrap()
-            .write(Method::Delete(key.to_string()));
+        let c_key = key.to_string();
+        let logs = Arc::clone(&self.logs);
+        std::thread::spawn(move || {
+            logs.lock().unwrap().write(Method::Delete(c_key));
+        });
+
         if memtable.contains_key(&key.to_string()) {
             memtable.remove(&key.to_string());
         } else {
@@ -188,23 +194,21 @@ impl Lsm {
         let mut memtable = self.memtable.lock().unwrap();
         let mut bloom_filter = self.bloom_filter.lock().unwrap();
 
-        self.logs
-            .lock()
-            .unwrap()
-            .write(Method::Update(key.to_string(), value.clone()));
+        let c_key = key.to_string();
+        let c_value = value.clone();
+        let logs = Arc::clone(&self.logs);
+        std::thread::spawn(move || {
+            logs.lock().unwrap().write(Method::Update(c_key, c_value));
+        });
 
         // Delete the old value from the bloom filter
         bloom_filter.delete(key);
 
-        if let std::collections::btree_map::Entry::Occupied(mut e) = memtable.entry(key.to_string())
-        {
-            e.insert(value);
-        } else {
-            let mut dense_index = self.dense_index.lock().unwrap();
+        let mut dense_index = self.dense_index.lock().unwrap();
+        dense_index.remove(&key.to_string());
+        drop(dense_index);
 
-            // Delete the old value from the dense index
-            dense_index.remove(&key.to_string());
-        }
+        memtable.insert(key.to_string(), value);
 
         bloom_filter.insert(key);
 
