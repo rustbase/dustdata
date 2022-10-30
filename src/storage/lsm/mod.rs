@@ -283,6 +283,11 @@ impl Lsm {
 
         keys
     }
+
+    pub fn drop(&mut self) {
+        self.clear();
+        self.bloom_filter.lock().unwrap().clear();
+    }
 }
 
 impl Drop for Lsm {
