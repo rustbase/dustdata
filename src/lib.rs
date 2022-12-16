@@ -7,6 +7,7 @@ pub use self::{
     dustdata::DustData, dustdata::DustDataConfig, dustdata::Error, dustdata::ErrorCode,
     dustdata::LsmConfig, dustdata::Result, dustdata::Size, storage::lsm::snapshots,
 };
+pub use bson;
 
 /// Initialize the database
 /// # Arguments
