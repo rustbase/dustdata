@@ -1,5 +1,5 @@
 #[macro_export]
-macro_rules! dd_println {
+macro_rules! logs {
     () => (print!("\n"));
     ($($arg:tt)*) => ({
         print!("[DustData] ");

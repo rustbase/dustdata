@@ -89,8 +89,7 @@ dustdata.delete("key");
 
 -   [x] Memtable (06/19/22)
 -   [x] SSTable (08/20/22)
--   [ ] Logs
--   [ ] Encryption
+-   [x] Snapshots (12/16/22)
 
 # Authors
 
