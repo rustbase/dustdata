@@ -1,6 +1,6 @@
 [package]
 name = "dustdata"
-version = "0.4.6"
+version = "1.0.0"
 edition = "2021"
 description = "A data concurrency control storage engine to Rustbase"
 repository = "https://github.com/rustbase/dustdata"
