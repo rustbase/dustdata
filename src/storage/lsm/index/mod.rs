@@ -18,17 +18,12 @@ pub fn write_index(path: &str, index: &HashMap<String, String>) {
         return;
     }
 
-    let mut doc = bson::Document::new();
-
-    for (key, offset) in index.iter() {
-        doc.insert(key, offset.to_string());
-    }
+    let doc = bson::to_vec(index).unwrap();
 
     let mut file = fs::File::create(_path).unwrap();
-    file.write_all(&bson::to_vec(&doc).expect("Failed to serialize index"))
-        .unwrap();
+    file.write_all(&doc).unwrap();
 
-    file.sync_all().unwrap();
+    file.flush().unwrap();
 }
 
 pub fn read_index(path: &str) -> HashMap<String, String> {
@@ -38,12 +33,7 @@ pub fn read_index(path: &str) -> HashMap<String, String> {
     let mut bytes_to_read: Vec<u8> = Vec::new();
     file.read_to_end(&mut bytes_to_read).unwrap();
 
-    let mut index: HashMap<String, String> = HashMap::new();
-    let index_bson: bson::Document = bson::from_slice(&bytes_to_read).unwrap();
+    let index_bson: HashMap<String, String> = bson::from_slice(&bytes_to_read).unwrap();
 
-    for doc in index_bson {
-        index.insert(doc.0.to_string(), doc.1.as_str().unwrap().to_string());
-    }
-
-    index
+    index_bson
 }
