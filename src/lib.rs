@@ -5,7 +5,7 @@ mod utils;
 
 pub use self::{
     dustdata::DustData, dustdata::DustDataConfig, dustdata::Error, dustdata::ErrorCode,
-    dustdata::LsmConfig, dustdata::Result, dustdata::Size,
+    dustdata::LsmConfig, dustdata::Result, dustdata::Size, storage::lsm::snapshots,
 };
 
 /// Initialize the database
@@ -24,7 +24,7 @@ mod dustdata_tests {
     fn get_default_config() -> DustDataConfig {
         DustDataConfig {
             verbose: true,
-            path: "./test_data".to_string(),
+            path: "./test_data/dustdata".to_string(),
             lsm_config: LsmConfig {
                 flush_threshold: Size::Megabytes(128),
             },

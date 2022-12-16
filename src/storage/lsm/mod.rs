@@ -1,4 +1,3 @@
-use logs::Method;
 use std::collections::{BTreeMap, HashMap};
 use std::mem;
 use std::ops::Deref;
@@ -6,16 +5,18 @@ use std::path;
 use std::sync::{Arc, Mutex};
 
 use crate::bloom::BloomFilter;
-use crate::dd_println;
 use crate::dustdata::{Error, ErrorCode, Result};
+use crate::logs;
+
+use self::snapshots::Snapshot;
 
 mod filter;
 mod index;
-mod logs;
+pub mod snapshots;
 mod sstable;
 mod writer;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct LsmConfig {
     pub flush_threshold: usize,
     pub sstable_path: String,
@@ -27,9 +28,9 @@ pub struct Lsm {
     pub memtable: Arc<Mutex<BTreeMap<String, bson::Bson>>>,
     pub memtable_size: usize,
     pub lsm_config: LsmConfig,
+    pub snapshots: snapshots::Snapshots,
     pub dense_index: Arc<Mutex<HashMap<String, String>>>,
     pub bloom_filter: Arc<Mutex<BloomFilter>>,
-    pub logs: Arc<Mutex<logs::Logs>>,
 }
 
 impl Lsm {
@@ -52,15 +53,21 @@ impl Lsm {
             std::fs::create_dir_all(&config.sstable_path).unwrap();
         }
 
-        let logs = logs::Logs::new(config.clone().sstable_path);
+        let snapshots = snapshots::Snapshots::new(
+            std::path::Path::new(&config.sstable_path)
+                .join("snapshots")
+                .to_str()
+                .unwrap()
+                .to_string(),
+        );
 
         Lsm {
             memtable: Arc::new(Mutex::new(BTreeMap::new())),
             bloom_filter: Arc::new(Mutex::new(bloom_filter)),
             dense_index: Arc::new(Mutex::new(index)),
             lsm_config: config,
-            logs: Arc::new(Mutex::new(logs)),
             memtable_size: 0, // The current memtable size (in bytes)
+            snapshots,
         }
     }
 
@@ -72,7 +79,7 @@ impl Lsm {
 
         ctrlc::set_handler(move || {
             if c_config.verbose {
-                dd_println!("Ctrl-C detected.");
+                logs!("Ctrl-C detected.");
             }
 
             let memtable = c_mem.lock().unwrap();
@@ -80,7 +87,7 @@ impl Lsm {
 
             if memtable.len() > 0 {
                 if c_config.verbose {
-                    dd_println!("Flushing memtable to disk...");
+                    logs!("Flushing memtable to disk...");
                 }
 
                 let segments =
@@ -96,7 +103,7 @@ impl Lsm {
                     keys.push(segment.0.clone());
                 }
             } else if c_config.verbose {
-                dd_println!("No data to flush.");
+                logs!("No data to flush.");
             }
 
             index::write_index(&c_config.sstable_path, dense_index.deref());
@@ -116,13 +123,6 @@ impl Lsm {
         }
 
         self.memtable_size += mem::size_of_val(&value);
-
-        let c_key = key.to_string();
-        let c_value = value.clone();
-        let logs = Arc::clone(&self.logs);
-        std::thread::spawn(move || {
-            logs.lock().unwrap().write(Method::Insert(c_key, c_value));
-        });
 
         self.memtable.lock().unwrap().insert(key.to_string(), value);
         self.bloom_filter.lock().unwrap().insert(key);
@@ -164,12 +164,6 @@ impl Lsm {
 
         let mut memtable = self.memtable.lock().unwrap();
 
-        let c_key = key.to_string();
-        let logs = Arc::clone(&self.logs);
-        std::thread::spawn(move || {
-            logs.lock().unwrap().write(Method::Delete(c_key));
-        });
-
         if memtable.contains_key(&key.to_string()) {
             memtable.remove(&key.to_string());
 
@@ -194,13 +188,6 @@ impl Lsm {
         let mut memtable = self.memtable.lock().unwrap();
         let mut bloom_filter = self.bloom_filter.lock().unwrap();
 
-        let c_key = key.to_string();
-        let c_value = value.clone();
-        let logs = Arc::clone(&self.logs);
-        std::thread::spawn(move || {
-            logs.lock().unwrap().write(Method::Update(c_key, c_value));
-        });
-
         // Delete the old value from the bloom filter
         bloom_filter.delete(key);
 
@@ -219,7 +206,7 @@ impl Lsm {
 
     pub fn flush(&mut self) {
         if self.lsm_config.verbose {
-            dd_println!("Flushing memtable to disk...");
+            logs!("Flushing memtable to disk...");
         }
 
         let mut dense_index = self.dense_index.lock().unwrap();
@@ -288,6 +275,16 @@ impl Lsm {
         self.clear();
         self.bloom_filter.lock().unwrap().clear();
     }
+
+    pub fn load_snapshot(&mut self, snapshot: Snapshot) {
+        let mut memtable = self.memtable.lock().unwrap();
+        let mut dense_index = self.dense_index.lock().unwrap();
+        let mut bloom_filter = self.bloom_filter.lock().unwrap();
+
+        *memtable = snapshot.memtable;
+        *dense_index = snapshot.dense_index;
+        *bloom_filter = snapshot.bloom_filter;
+    }
 }
 
 impl Drop for Lsm {
@@ -296,12 +293,12 @@ impl Drop for Lsm {
         let mut dense_index = self.dense_index.lock().unwrap();
 
         if self.lsm_config.verbose {
-            dd_println!("LSM is being dropped.");
+            logs!("LSM is being dropped.");
         }
 
         if memtable.len() > 0 {
             if self.lsm_config.verbose {
-                dd_println!("Flushing memtable to disk.");
+                logs!("Flushing memtable to disk.");
             }
 
             let segments = sstable::Segment::from_tree(
@@ -319,7 +316,7 @@ impl Drop for Lsm {
                 keys.push(segment.0.clone());
             }
         } else if self.lsm_config.verbose {
-            dd_println!("No memtable to flush to disk.");
+            logs!("No memtable to flush to disk.");
         }
 
         index::write_index(&self.lsm_config.sstable_path, dense_index.deref());
