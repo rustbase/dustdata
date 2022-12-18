@@ -7,9 +7,11 @@ use storage::lsm;
 /// A LSM configuration
 /// # Arguments
 /// * `flush_threshold` - The number of bytes to flush before flushing to disk
+/// * `detect_exit_signals` - Whether or not to detect exit signals (SIGTERM, SIGHUP, etc.)
 #[derive(Clone)]
 pub struct LsmConfig {
     pub flush_threshold: Size,
+    pub detect_exit_signals: bool,
 }
 
 /// A DustData configuration
@@ -154,7 +156,9 @@ impl DustData {
             sstable_path: path.to_str().unwrap().to_string(),
         });
 
-        lsm.handle_ctrlc();
+        if configuration.lsm_config.detect_exit_signals {
+            lsm.handle_ctrlc();
+        }
 
         Self {
             lsm,

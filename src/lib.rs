@@ -27,6 +27,7 @@ mod dustdata_tests {
             verbose: true,
             path: "./test_data/dustdata".to_string(),
             lsm_config: LsmConfig {
+                detect_exit_signals: false,
                 flush_threshold: Size::Megabytes(128),
             },
         }
