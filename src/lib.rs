@@ -107,7 +107,7 @@ mod dustdata_tests {
         .unwrap();
 
         // flush the sstable
-        dd.lsm.flush();
+        dd.flush().unwrap();
 
         let ls = dd.list_keys().unwrap();
 

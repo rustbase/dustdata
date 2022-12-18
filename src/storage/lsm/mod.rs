@@ -128,7 +128,7 @@ impl Lsm {
         self.bloom_filter.lock().unwrap().insert(key);
 
         if self.memtable_size >= self.lsm_config.flush_threshold {
-            self.flush();
+            self.flush().unwrap();
         }
 
         Ok(())
@@ -204,7 +204,7 @@ impl Lsm {
         Ok(())
     }
 
-    pub fn flush(&mut self) {
+    pub fn flush(&mut self) -> Result<()> {
         if self.lsm_config.verbose {
             logs!("Flushing memtable to disk...");
         }
@@ -237,6 +237,8 @@ impl Lsm {
 
         self.memtable.lock().unwrap().clear();
         self.memtable_size = 0;
+
+        Ok(())
     }
 
     pub fn get_memtable(&self) -> BTreeMap<String, bson::Bson> {

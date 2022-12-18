@@ -205,8 +205,18 @@ impl DustData {
         self.lsm.contains(key)
     }
 
+    /// List all keys.
+    /// # Returns
+    /// - `Result<Vec<String>>` a vector of all keys.
     pub fn list_keys(&self) -> Result<Vec<String>> {
         Ok(self.lsm.list_keys())
+    }
+
+    /// Flush all data to disk.
+    /// # Returns
+    /// - `Result<()>` if successful returns nothing.
+    pub fn flush(&mut self) -> Result<()> {
+        self.lsm.flush()
     }
 }
 
