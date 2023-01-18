@@ -85,25 +85,29 @@ impl Lsm {
             let memtable = c_mem.lock().unwrap();
             let mut dense_index = c_den.lock().unwrap();
 
-            if memtable.len() > 0 {
+            if memtable.is_empty() {
                 if c_config.verbose {
-                    logs!("Flushing memtable to disk...");
+                    logs!("No data to flush.");
                 }
 
-                let segments =
-                    sstable::Segment::from_tree(memtable.deref(), c_config.sstable_path.as_str());
+                std::process::exit(0);
+            }
 
-                for token in segments.1 {
-                    dense_index.insert(token.0, token.1);
-                }
+            if c_config.verbose {
+                logs!("Flushing memtable to disk...");
+            }
 
-                let mut keys = Vec::new();
+            let segments =
+                sstable::Segment::from_tree(memtable.deref(), c_config.sstable_path.as_str());
 
-                for segment in dense_index.deref() {
-                    keys.push(segment.0.clone());
-                }
-            } else if c_config.verbose {
-                logs!("No data to flush.");
+            for token in segments.1 {
+                dense_index.insert(token.0, token.1);
+            }
+
+            let mut keys = Vec::new();
+
+            for segment in dense_index.deref() {
+                keys.push(segment.0.clone());
             }
 
             index::write_index(&c_config.sstable_path, dense_index.deref());
@@ -205,16 +209,20 @@ impl Lsm {
     }
 
     pub fn flush(&mut self) -> Result<()> {
+        let memtable = self.get_memtable();
+
         if self.lsm_config.verbose {
             logs!("Flushing memtable to disk...");
         }
 
+        if memtable.is_empty() {
+            return Ok(());
+        }
+
         let mut dense_index = self.dense_index.lock().unwrap();
 
-        let segments = sstable::Segment::from_tree(
-            &self.get_memtable(),
-            self.lsm_config.sstable_path.as_str(),
-        );
+        let segments =
+            sstable::Segment::from_tree(&memtable, self.lsm_config.sstable_path.as_str());
 
         for token in segments.1 {
             dense_index.insert(token.0, token.1);
@@ -298,27 +306,29 @@ impl Drop for Lsm {
             logs!("LSM is being dropped.");
         }
 
-        if memtable.len() > 0 {
+        if memtable.is_empty() {
             if self.lsm_config.verbose {
-                logs!("Flushing memtable to disk.");
+                logs!("No memtable to flush to disk.");
             }
 
-            let segments = sstable::Segment::from_tree(
-                memtable.deref(),
-                self.lsm_config.sstable_path.as_str(),
-            );
+            return;
+        }
 
-            for token in segments.1 {
-                dense_index.insert(token.0, token.1);
-            }
+        if self.lsm_config.verbose {
+            logs!("Flushing memtable to disk.");
+        }
 
-            let mut keys = Vec::new();
+        let segments =
+            sstable::Segment::from_tree(memtable.deref(), self.lsm_config.sstable_path.as_str());
 
-            for segment in dense_index.deref() {
-                keys.push(segment.0.clone());
-            }
-        } else if self.lsm_config.verbose {
-            logs!("No memtable to flush to disk.");
+        for token in segments.1 {
+            dense_index.insert(token.0, token.1);
+        }
+
+        let mut keys = Vec::new();
+
+        for segment in dense_index.deref() {
+            keys.push(segment.0.clone());
         }
 
         index::write_index(&self.lsm_config.sstable_path, dense_index.deref());
