@@ -6,7 +6,6 @@ use std::sync::{Arc, Mutex};
 
 use crate::bloom::BloomFilter;
 use crate::dustdata::{Error, ErrorCode, Result};
-use crate::logs;
 
 use self::snapshots::Snapshot;
 
@@ -20,7 +19,6 @@ mod writer;
 pub struct LsmConfig {
     pub flush_threshold: usize,
     pub sstable_path: String,
-    pub verbose: bool,
 }
 
 #[derive(Clone)]
@@ -69,53 +67,6 @@ impl Lsm {
             memtable_size: 0, // The current memtable size (in bytes)
             snapshots,
         }
-    }
-
-    pub fn handle_ctrlc(&mut self) {
-        let c_mem = Arc::clone(&self.memtable);
-        let c_den = Arc::clone(&self.dense_index);
-        let c_config = self.lsm_config.clone();
-        let c_bloom = Arc::clone(&self.bloom_filter);
-
-        ctrlc::set_handler(move || {
-            if c_config.verbose {
-                logs!("Ctrl-C detected.");
-            }
-
-            let memtable = c_mem.lock().unwrap();
-            let mut dense_index = c_den.lock().unwrap();
-
-            if memtable.is_empty() {
-                if c_config.verbose {
-                    logs!("No data to flush.");
-                }
-
-                std::process::exit(0);
-            }
-
-            if c_config.verbose {
-                logs!("Flushing memtable to disk...");
-            }
-
-            let segments =
-                sstable::Segment::from_tree(memtable.deref(), c_config.sstable_path.as_str());
-
-            for token in segments.1 {
-                dense_index.insert(token.0, token.1);
-            }
-
-            let mut keys = Vec::new();
-
-            for segment in dense_index.deref() {
-                keys.push(segment.0.clone());
-            }
-
-            index::write_index(&c_config.sstable_path, dense_index.deref());
-            filter::write_filter(&c_config.sstable_path, c_bloom.lock().unwrap().deref());
-
-            std::process::exit(0);
-        })
-        .ok();
     }
 
     pub fn insert(&mut self, key: &str, value: bson::Bson) -> Result<()> {
@@ -211,10 +162,6 @@ impl Lsm {
     pub fn flush(&mut self) -> Result<()> {
         let memtable = self.get_memtable();
 
-        if self.lsm_config.verbose {
-            logs!("Flushing memtable to disk...");
-        }
-
         if memtable.is_empty() {
             return Ok(());
         }
@@ -302,20 +249,8 @@ impl Drop for Lsm {
         let memtable = self.memtable.lock().unwrap();
         let mut dense_index = self.dense_index.lock().unwrap();
 
-        if self.lsm_config.verbose {
-            logs!("LSM is being dropped.");
-        }
-
         if memtable.is_empty() {
-            if self.lsm_config.verbose {
-                logs!("No memtable to flush to disk.");
-            }
-
             return;
-        }
-
-        if self.lsm_config.verbose {
-            logs!("Flushing memtable to disk.");
         }
 
         let segments =

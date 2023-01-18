@@ -21,6 +21,5 @@ hex = "0.4.3"
 lz4 = "1.24.0"
 farmhash = "1.1.5"
 bitvec = "1.0.1"
-ctrlc = {version = "3.2.3", features = ["termination"]}
 serde = {version = "1.0.148", features = ["derive"]}
 chrono = "0.4.23"

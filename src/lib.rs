@@ -1,7 +1,6 @@
 mod bloom;
 mod dustdata;
 mod storage;
-mod utils;
 
 pub use self::{
     dustdata::DustData, dustdata::DustDataConfig, dustdata::Error, dustdata::ErrorCode,
@@ -24,10 +23,8 @@ mod dustdata_tests {
 
     fn get_default_config() -> DustDataConfig {
         DustDataConfig {
-            verbose: true,
             path: "./test_data/dustdata".to_string(),
             lsm_config: LsmConfig {
-                detect_exit_signals: false,
                 flush_threshold: Size::Megabytes(128),
             },
         }

@@ -11,7 +11,6 @@ use storage::lsm;
 #[derive(Clone)]
 pub struct LsmConfig {
     pub flush_threshold: Size,
-    pub detect_exit_signals: bool,
 }
 
 /// A DustData configuration
@@ -22,7 +21,6 @@ pub struct LsmConfig {
 #[derive(Clone)]
 pub struct DustDataConfig {
     pub path: String,
-    pub verbose: bool,
     pub lsm_config: LsmConfig,
 }
 
@@ -150,15 +148,10 @@ impl DustData {
     pub fn new(configuration: DustDataConfig) -> Self {
         let path = path::Path::new(&configuration.path);
 
-        let mut lsm = storage::lsm::Lsm::new(lsm::LsmConfig {
-            verbose: configuration.verbose,
+        let lsm = storage::lsm::Lsm::new(lsm::LsmConfig {
             flush_threshold: size_to_usize(configuration.clone().lsm_config.flush_threshold),
             sstable_path: path.to_str().unwrap().to_string(),
         });
-
-        if configuration.lsm_config.detect_exit_signals {
-            lsm.handle_ctrlc();
-        }
 
         Self {
             lsm,
