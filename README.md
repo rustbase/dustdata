@@ -26,7 +26,7 @@ Add the following to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-dustdata = "1.1.0"
+dustdata = "1.2.0"
 ```
 
 # Usage
