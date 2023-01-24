@@ -2,33 +2,33 @@ use std::collections::{BTreeMap, HashMap};
 use std::mem;
 use std::ops::Deref;
 use std::path;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, RwLock};
 
 use crate::bloom::BloomFilter;
 use crate::dustdata::{Error, ErrorCode, Result};
 
 use self::snapshots::Snapshot;
 
-mod filter;
-mod index;
+pub mod filter;
+pub mod index;
 pub mod snapshots;
-mod sstable;
+pub mod sstable;
 mod writer;
 
 #[derive(Clone, Debug)]
 pub struct LsmConfig {
     pub flush_threshold: usize,
-    pub sstable_path: String,
+    pub sstable_path: path::PathBuf,
 }
 
 #[derive(Clone)]
 pub struct Lsm {
-    pub memtable: Arc<Mutex<BTreeMap<String, bson::Bson>>>,
+    pub memtable: Arc<RwLock<BTreeMap<String, bson::Bson>>>,
     pub memtable_size: usize,
     pub lsm_config: LsmConfig,
     pub snapshots: snapshots::SnapshotManager,
-    pub dense_index: Arc<Mutex<HashMap<String, String>>>,
-    pub bloom_filter: Arc<Mutex<BloomFilter>>,
+    pub dense_index: Arc<RwLock<HashMap<String, String>>>,
+    pub bloom_filter: Arc<RwLock<BloomFilter>>,
 }
 
 impl Lsm {
@@ -56,9 +56,9 @@ impl Lsm {
         );
 
         Lsm {
-            memtable: Arc::new(Mutex::new(BTreeMap::new())),
-            bloom_filter: Arc::new(Mutex::new(bloom_filter)),
-            dense_index: Arc::new(Mutex::new(index)),
+            memtable: Arc::new(RwLock::new(BTreeMap::new())),
+            bloom_filter: Arc::new(RwLock::new(bloom_filter)),
+            dense_index: Arc::new(RwLock::new(index)),
             lsm_config: config,
             memtable_size: 0, // The current memtable size (in bytes)
             snapshots,
@@ -75,8 +75,11 @@ impl Lsm {
 
         self.memtable_size += mem::size_of_val(&value);
 
-        self.memtable.lock().unwrap().insert(key.to_string(), value);
-        self.bloom_filter.lock().unwrap().insert(key);
+        self.memtable
+            .write()
+            .unwrap()
+            .insert(key.to_string(), value);
+        self.bloom_filter.write().unwrap().insert(key);
 
         if self.memtable_size >= self.lsm_config.flush_threshold {
             self.flush().unwrap();
@@ -90,16 +93,16 @@ impl Lsm {
             return Ok(None);
         }
 
-        let memtable = self.memtable.lock().unwrap();
+        let memtable = self.memtable.read().unwrap();
 
         match memtable.get(&key.to_string()) {
             Some(document) => Ok(Some(document.clone())),
             None => {
-                let dense_index = self.dense_index.lock().unwrap();
+                let dense_index = self.dense_index.read().unwrap();
                 let offset = dense_index.get(&key.to_string()).unwrap();
                 Ok(sstable::Segment::read_with_offset(
                     offset.to_string(),
-                    self.lsm_config.sstable_path.to_string(),
+                    &self.lsm_config.sstable_path,
                 ))
             }
         }
@@ -113,17 +116,17 @@ impl Lsm {
             });
         }
 
-        let mut memtable = self.memtable.lock().unwrap();
+        let mut memtable = self.memtable.write().unwrap();
 
         if memtable.contains_key(&key.to_string()) {
             memtable.remove(&key.to_string());
 
             drop(memtable);
         } else {
-            self.dense_index.lock().unwrap().remove(&key.to_string());
+            self.dense_index.write().unwrap().remove(&key.to_string());
         }
 
-        self.bloom_filter.lock().unwrap().delete(key);
+        self.bloom_filter.write().unwrap().delete(key);
 
         Ok(())
     }
@@ -136,13 +139,13 @@ impl Lsm {
             });
         }
 
-        let mut memtable = self.memtable.lock().unwrap();
-        let mut bloom_filter = self.bloom_filter.lock().unwrap();
+        let mut memtable = self.memtable.write().unwrap();
+        let mut bloom_filter = self.bloom_filter.write().unwrap();
 
         // Delete the old value from the bloom filter
         bloom_filter.delete(key);
 
-        let mut dense_index = self.dense_index.lock().unwrap();
+        let mut dense_index = self.dense_index.write().unwrap();
         dense_index.remove(&key.to_string());
         drop(dense_index);
 
@@ -162,10 +165,9 @@ impl Lsm {
             return Ok(());
         }
 
-        let mut dense_index = self.dense_index.lock().unwrap();
+        let mut dense_index = self.dense_index.write().unwrap();
 
-        let segments =
-            sstable::Segment::from_tree(&memtable, self.lsm_config.sstable_path.as_str());
+        let segments = sstable::Segment::from_tree(&memtable, &self.lsm_config.sstable_path);
 
         for token in segments.1 {
             dense_index.insert(token.0, token.1);
@@ -183,41 +185,41 @@ impl Lsm {
 
         filter::write_filter(
             &self.lsm_config.sstable_path,
-            self.bloom_filter.lock().unwrap().deref(),
+            self.bloom_filter.read().unwrap().deref(),
         );
 
-        self.memtable.lock().unwrap().clear();
+        self.memtable.write().unwrap().clear();
         self.memtable_size = 0;
 
         Ok(())
     }
 
     pub fn get_memtable(&self) -> BTreeMap<String, bson::Bson> {
-        self.memtable.lock().unwrap().clone()
+        self.memtable.read().unwrap().clone()
     }
 
     pub fn contains(&self, key: &str) -> bool {
-        self.bloom_filter.lock().unwrap().contains(key)
+        self.bloom_filter.read().unwrap().contains(key)
     }
 
     pub fn clear(&self) {
-        self.memtable.lock().unwrap().clear();
-        self.dense_index.lock().unwrap().clear();
+        self.memtable.write().unwrap().clear();
+        self.dense_index.write().unwrap().clear();
     }
 
     pub fn update_index(&self) {
-        let index = self.dense_index.lock().unwrap().clone();
+        let index = self.dense_index.read().unwrap().clone();
         index::write_index(&self.lsm_config.sstable_path, &index);
     }
 
     pub fn list_keys(&self) -> Vec<String> {
         let mut keys = Vec::new();
 
-        for key in self.memtable.lock().unwrap().keys() {
+        for key in self.memtable.read().unwrap().keys() {
             keys.push(key.clone());
         }
 
-        for key in self.dense_index.lock().unwrap().keys() {
+        for key in self.dense_index.read().unwrap().keys() {
             keys.push(key.clone());
         }
 
@@ -226,27 +228,26 @@ impl Lsm {
 
     pub fn drop(&mut self) {
         self.clear();
-        self.bloom_filter.lock().unwrap().clear();
+        self.bloom_filter.write().unwrap().clear();
     }
 
     pub fn load_snapshot(path: path::PathBuf, snapshot: Snapshot) {
-        sstable::Segment::from_tree(snapshot.get_memtable(), &path.display().to_string());
-        index::write_index(&path.display().to_string(), snapshot.get_dense_index());
-        filter::write_filter(&path.display().to_string(), snapshot.get_bloom_filter());
+        sstable::Segment::from_tree(snapshot.get_memtable(), &path);
+        index::write_index(&path, snapshot.get_dense_index());
+        filter::write_filter(&path, snapshot.get_bloom_filter());
     }
 }
 
 impl Drop for Lsm {
     fn drop(&mut self) {
-        let memtable = self.memtable.lock().unwrap();
-        let mut dense_index = self.dense_index.lock().unwrap();
+        let memtable = self.memtable.read().unwrap();
+        let mut dense_index = self.dense_index.write().unwrap();
 
         if memtable.is_empty() {
             return;
         }
 
-        let segments =
-            sstable::Segment::from_tree(memtable.deref(), self.lsm_config.sstable_path.as_str());
+        let segments = sstable::Segment::from_tree(memtable.deref(), &self.lsm_config.sstable_path);
 
         for token in segments.1 {
             dense_index.insert(token.0, token.1);
@@ -262,7 +263,7 @@ impl Drop for Lsm {
 
         filter::write_filter(
             &self.lsm_config.sstable_path,
-            self.bloom_filter.lock().unwrap().deref(),
+            self.bloom_filter.read().unwrap().deref(),
         );
     }
 }

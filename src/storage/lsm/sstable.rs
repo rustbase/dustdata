@@ -70,8 +70,8 @@ pub struct Segment {
 }
 
 impl Segment {
-    pub fn new(path: &str) -> Self {
-        let _path = path::Path::new(path).join("data");
+    pub fn new(path: &path::Path) -> Self {
+        let _path = path.join("data");
 
         if !_path.exists() {
             fs::create_dir_all(_path.clone()).unwrap();
@@ -89,12 +89,12 @@ impl Segment {
         }
     }
 
-    pub fn read_with_offset(offset: String, path: String) -> Option<bson::Bson> {
+    pub fn read_with_offset(offset: String, path: &path::Path) -> Option<bson::Bson> {
         let splited_offset = offset.split('_').collect::<Vec<&str>>();
         let file_index = splited_offset[0].parse::<u64>().unwrap();
         let offset = splited_offset[1].parse::<u64>().unwrap();
 
-        let path = path::Path::new(&path).join("data");
+        let path = path.join("data");
         let file_path = path.join(get_file_that_starts_with_index(
             (*path).to_path_buf(),
             file_index as usize,
@@ -126,7 +126,7 @@ impl Segment {
 
     pub fn from_tree(
         tree: &BTreeMap<String, bson::Bson>,
-        path: &str,
+        path: &path::Path,
     ) -> (Segment, Vec<(String, String)>) {
         let mut segment = Segment::new(path);
 
