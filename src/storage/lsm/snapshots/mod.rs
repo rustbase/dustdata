@@ -87,9 +87,9 @@ impl Snapshot {
         }
 
         let snapshot = Snapshot::new(
-            lsm.memtable.lock().unwrap().clone(),
-            lsm.bloom_filter.lock().unwrap().clone(),
-            lsm.dense_index.lock().unwrap().clone(),
+            lsm.memtable.read().unwrap().clone(),
+            lsm.bloom_filter.read().unwrap().clone(),
+            lsm.dense_index.read().unwrap().clone(),
         );
 
         let now = chrono::Local::now();
