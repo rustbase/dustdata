@@ -9,10 +9,10 @@ use crate::dustdata::{Error, ErrorCode, Result};
 
 use self::snapshots::Snapshot;
 
-mod filter;
-mod index;
+pub mod filter;
+pub mod index;
 pub mod snapshots;
-mod sstable;
+pub mod sstable;
 mod writer;
 
 #[derive(Clone, Debug)]

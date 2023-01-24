@@ -1,6 +1,6 @@
-mod bloom;
+pub mod bloom;
 mod dustdata;
-mod storage;
+pub mod storage;
 
 pub use self::{
     dustdata::DustData, dustdata::DustDataConfig, dustdata::Error, dustdata::ErrorCode,
