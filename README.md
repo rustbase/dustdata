@@ -36,7 +36,7 @@ Initialize a DustData interface.
 ```rust
 // DustData Configuration
 let config = dustdata::DustDataConfig {
-    path: "./test_data".to_string(),
+    path: std::path::Path::new("./test_data/dustdata").to_path_buf(),
     lsm_config: dustdata::LsmConfig {
         flush_threshold: dustdata::Size::Megabytes(128),
     }

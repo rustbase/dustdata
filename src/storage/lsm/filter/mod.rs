@@ -1,15 +1,18 @@
 use crate::bloom::BloomFilter;
 use lz4::{Decoder, EncoderBuilder};
-use std::io::{Read, Write};
+use std::{
+    io::{Read, Write},
+    path,
+};
 
-pub fn check_if_filter_exists(path: &str) -> bool {
-    let _path = std::path::Path::new(path).join("filter");
+pub fn check_if_filter_exists(path: &path::Path) -> bool {
+    let _path = path.join("filter");
 
     _path.exists()
 }
 
-pub fn write_filter(path: &str, filter: &BloomFilter) {
-    let _path = std::path::Path::new(path).join("filter");
+pub fn write_filter(path: &path::Path, filter: &BloomFilter) {
+    let _path = path.join("filter");
 
     if !check_if_filter_exists(path) {
         std::fs::create_dir_all(_path.clone()).unwrap();
@@ -36,8 +39,8 @@ pub fn write_filter(path: &str, filter: &BloomFilter) {
     hashes_file.sync_all().unwrap();
 }
 
-pub fn read_filter(path: &str) -> BloomFilter {
-    let _path = std::path::Path::new(path).join("filter");
+pub fn read_filter(path: &path::Path) -> BloomFilter {
+    let _path = path.join("filter");
 
     // bitvec
 
