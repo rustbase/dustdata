@@ -26,7 +26,7 @@ pub struct Lsm {
     pub memtable: Arc<Mutex<BTreeMap<String, bson::Bson>>>,
     pub memtable_size: usize,
     pub lsm_config: LsmConfig,
-    pub snapshots: snapshots::Snapshots,
+    pub snapshots: snapshots::SnapshotManager,
     pub dense_index: Arc<Mutex<HashMap<String, String>>>,
     pub bloom_filter: Arc<Mutex<BloomFilter>>,
 }
@@ -51,12 +51,8 @@ impl Lsm {
             std::fs::create_dir_all(&config.sstable_path).unwrap();
         }
 
-        let snapshots = snapshots::Snapshots::new(
-            std::path::Path::new(&config.sstable_path)
-                .join("snapshots")
-                .to_str()
-                .unwrap()
-                .to_string(),
+        let snapshots = snapshots::SnapshotManager::new(
+            std::path::Path::new(&config.sstable_path).join("snapshots"),
         );
 
         Lsm {
@@ -233,14 +229,10 @@ impl Lsm {
         self.bloom_filter.lock().unwrap().clear();
     }
 
-    pub fn load_snapshot(&mut self, snapshot: Snapshot) {
-        let mut memtable = self.memtable.lock().unwrap();
-        let mut dense_index = self.dense_index.lock().unwrap();
-        let mut bloom_filter = self.bloom_filter.lock().unwrap();
-
-        *memtable = snapshot.memtable;
-        *dense_index = snapshot.dense_index;
-        *bloom_filter = snapshot.bloom_filter;
+    pub fn load_snapshot(path: path::PathBuf, snapshot: Snapshot) {
+        sstable::Segment::from_tree(snapshot.get_memtable(), &path.display().to_string());
+        index::write_index(&path.display().to_string(), snapshot.get_dense_index());
+        filter::write_filter(&path.display().to_string(), snapshot.get_bloom_filter());
     }
 }
 
