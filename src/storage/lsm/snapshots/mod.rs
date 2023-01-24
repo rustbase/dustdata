@@ -3,66 +3,20 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::bloom::BloomFilter;
 
 use super::Lsm;
 
 #[derive(Clone, Debug)]
-pub struct Snapshots {
+pub struct SnapshotManager {
     path: PathBuf,
 }
 
-impl Snapshots {
-    pub fn new(path: String) -> Snapshots {
-        let path = Path::new(&path);
-
-        if !path.exists() {
-            std::fs::create_dir_all(path).unwrap();
-        }
-
-        Snapshots {
-            path: PathBuf::from(path),
-        }
-    }
-
-    pub fn create_snapshot(&self, lsm: &Lsm) -> String {
-        let snapshot = Snapshot::new(
-            lsm.memtable.lock().unwrap().clone(),
-            lsm.bloom_filter.lock().unwrap().clone(),
-            lsm.dense_index.lock().unwrap().clone(),
-        );
-
-        let timestamp = snapshot.timestamp();
-        let path = Path::new(&self.path);
-
-        let snapshot_path = path.join(timestamp.clone());
-        let file = fs::File::create(snapshot_path).unwrap();
-
-        let snapshot = bson::to_vec(&snapshot).unwrap();
-
-        let mut encoder = EncoderBuilder::new()
-            .build(file)
-            .expect("cannot create encoder");
-
-        encoder.write_all(&snapshot).unwrap();
-        encoder.flush().unwrap();
-
-        timestamp
-    }
-
-    pub fn load_snapshot(&self, timestamp: String) -> Snapshot {
-        let path = self.path.join(timestamp);
-
-        let file = fs::File::open(path).unwrap();
-
-        let mut decoder = Decoder::new(file).unwrap();
-        let mut contents = Vec::new();
-        decoder.read_to_end(&mut contents).unwrap();
-        let snapshot: Snapshot = bson::from_slice(&contents).unwrap();
-
-        snapshot
+impl SnapshotManager {
+    pub fn new(path: PathBuf) -> Self {
+        SnapshotManager { path }
     }
 
     pub fn load_last_snapshot(&self) -> Snapshot {
@@ -80,14 +34,17 @@ impl Snapshots {
             }
         }
 
-        let snapshot: Snapshot = self.load_snapshot(
-            last_snapshot
-                .file_name()
-                .unwrap()
-                .to_str()
-                .unwrap()
-                .to_string(),
-        );
+        let snapshot: Snapshot = Snapshot::load_snapshot(last_snapshot);
+
+        snapshot
+    }
+
+    pub fn load_snapshot_by_index(&self, index: usize) -> Snapshot {
+        let mut paths = fs::read_dir(&self.path).unwrap();
+
+        let snapshot = paths.nth(index).unwrap().unwrap().path();
+
+        let snapshot: Snapshot = Snapshot::load_snapshot(snapshot);
 
         snapshot
     }
@@ -113,8 +70,60 @@ impl Snapshot {
         }
     }
 
+    pub fn load_snapshot(path: PathBuf) -> Snapshot {
+        let file = fs::File::open(path).unwrap();
+
+        let mut decoder = Decoder::new(file).unwrap();
+        let mut contents = Vec::new();
+        decoder.read_to_end(&mut contents).unwrap();
+        let snapshot: Snapshot = bson::from_slice(&contents).unwrap();
+
+        snapshot
+    }
+
+    pub fn create_snapshot(lsm: &Lsm, path: PathBuf) -> String {
+        if !path.exists() {
+            std::fs::create_dir_all(path.clone()).unwrap();
+        }
+
+        let snapshot = Snapshot::new(
+            lsm.memtable.lock().unwrap().clone(),
+            lsm.bloom_filter.lock().unwrap().clone(),
+            lsm.dense_index.lock().unwrap().clone(),
+        );
+
+        let now = chrono::Local::now();
+        let timestamp = now.format("%Y-%m-%d-%H-%M-%S").to_string();
+
+        let snapshot_path = path.join(timestamp.clone());
+        let file = fs::File::create(snapshot_path).unwrap();
+
+        let snapshot = bson::to_vec(&snapshot).unwrap();
+
+        let mut encoder = EncoderBuilder::new()
+            .build(file)
+            .expect("cannot create encoder");
+
+        encoder.write_all(&snapshot).unwrap();
+        encoder.flush().unwrap();
+
+        timestamp
+    }
+
+    pub fn get_memtable(&self) -> &BTreeMap<String, bson::Bson> {
+        &self.memtable
+    }
+
+    pub fn get_bloom_filter(&self) -> &BloomFilter {
+        &self.bloom_filter
+    }
+
+    pub fn get_dense_index(&self) -> &HashMap<String, String> {
+        &self.dense_index
+    }
+
     pub fn timestamp(&self) -> String {
         let now = chrono::Local::now();
-        now.format("%Y-%m-%d_%H-%M-%S").to_string()
+        now.format("%Y-%m-%d-%H-%M-%S").to_string()
     }
 }
