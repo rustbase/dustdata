@@ -20,7 +20,7 @@ pub struct LsmConfig {
 /// * `lsm_config` - The LSM configuration
 #[derive(Clone)]
 pub struct DustDataConfig {
-    pub path: String,
+    pub path: path::PathBuf,
     pub lsm_config: LsmConfig,
 }
 
@@ -146,11 +146,9 @@ impl std::fmt::Display for ErrorCode {
 
 impl DustData {
     pub fn new(configuration: DustDataConfig) -> Self {
-        let path = path::Path::new(&configuration.path);
-
         let lsm = storage::lsm::Lsm::new(lsm::LsmConfig {
             flush_threshold: size_to_usize(configuration.clone().lsm_config.flush_threshold),
-            sstable_path: path.to_str().unwrap().to_string(),
+            sstable_path: configuration.clone().path,
         });
 
         Self {

@@ -5,14 +5,14 @@ use std::{
     path,
 };
 
-pub fn check_if_index_exists(path: &str) -> bool {
-    let _path = path::Path::new(path).join("index");
+pub fn check_if_index_exists(path: &path::Path) -> bool {
+    let _path = path.join("index");
 
     _path.exists()
 }
 
-pub fn write_index(path: &str, index: &HashMap<String, String>) {
-    let _path = path::Path::new(path).join("index");
+pub fn write_index(path: &path::Path, index: &HashMap<String, String>) {
+    let _path = path.join("index");
 
     if index.is_empty() {
         return;
@@ -26,8 +26,8 @@ pub fn write_index(path: &str, index: &HashMap<String, String>) {
     file.flush().unwrap();
 }
 
-pub fn read_index(path: &str) -> HashMap<String, String> {
-    let _path = path::Path::new(path).join("index");
+pub fn read_index(path: &path::Path) -> HashMap<String, String> {
+    let _path = path.join("index");
 
     let mut file = fs::File::open(_path).unwrap();
     let mut bytes_to_read: Vec<u8> = Vec::new();

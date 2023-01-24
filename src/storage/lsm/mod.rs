@@ -18,7 +18,7 @@ mod writer;
 #[derive(Clone, Debug)]
 pub struct LsmConfig {
     pub flush_threshold: usize,
-    pub sstable_path: String,
+    pub sstable_path: path::PathBuf,
 }
 
 #[derive(Clone)]
@@ -99,7 +99,7 @@ impl Lsm {
                 let offset = dense_index.get(&key.to_string()).unwrap();
                 Ok(sstable::Segment::read_with_offset(
                     offset.to_string(),
-                    self.lsm_config.sstable_path.to_string(),
+                    &self.lsm_config.sstable_path,
                 ))
             }
         }
@@ -164,8 +164,7 @@ impl Lsm {
 
         let mut dense_index = self.dense_index.lock().unwrap();
 
-        let segments =
-            sstable::Segment::from_tree(&memtable, self.lsm_config.sstable_path.as_str());
+        let segments = sstable::Segment::from_tree(&memtable, &self.lsm_config.sstable_path);
 
         for token in segments.1 {
             dense_index.insert(token.0, token.1);
@@ -230,9 +229,9 @@ impl Lsm {
     }
 
     pub fn load_snapshot(path: path::PathBuf, snapshot: Snapshot) {
-        sstable::Segment::from_tree(snapshot.get_memtable(), &path.display().to_string());
-        index::write_index(&path.display().to_string(), snapshot.get_dense_index());
-        filter::write_filter(&path.display().to_string(), snapshot.get_bloom_filter());
+        sstable::Segment::from_tree(snapshot.get_memtable(), &path);
+        index::write_index(&path, snapshot.get_dense_index());
+        filter::write_filter(&path, snapshot.get_bloom_filter());
     }
 }
 
@@ -245,8 +244,7 @@ impl Drop for Lsm {
             return;
         }
 
-        let segments =
-            sstable::Segment::from_tree(memtable.deref(), self.lsm_config.sstable_path.as_str());
+        let segments = sstable::Segment::from_tree(memtable.deref(), &self.lsm_config.sstable_path);
 
         for token in segments.1 {
             dense_index.insert(token.0, token.1);
