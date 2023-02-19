@@ -23,6 +23,7 @@ pub fn write_index(path: &path::Path, index: &HashMap<String, String>) {
     let mut file = fs::File::create(_path).unwrap();
     file.write_all(&doc).unwrap();
 
+    file.sync_data().unwrap();
     file.flush().unwrap();
 }
 
