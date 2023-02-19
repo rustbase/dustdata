@@ -116,17 +116,13 @@ impl Lsm {
             });
         }
 
-        let mut memtable = self.memtable.write().unwrap();
-
-        if memtable.contains_key(&key.to_string()) {
-            memtable.remove(&key.to_string());
-
-            drop(memtable);
-        } else {
-            self.dense_index.write().unwrap().remove(&key.to_string());
-        }
-
+        let value = self.memtable.write().unwrap().remove(&key.to_string());
+        self.dense_index.write().unwrap().remove(&key.to_string());
         self.bloom_filter.write().unwrap().delete(key);
+
+        if let Some(value) = value {
+            self.memtable_size += mem::size_of_val(&value);
+        }
 
         Ok(())
     }
@@ -160,38 +156,37 @@ impl Lsm {
 
     pub fn flush(&mut self) -> Result<()> {
         let memtable = self.get_memtable();
-
-        if memtable.is_empty() {
-            return Ok(());
-        }
-
         let mut dense_index = self.dense_index.write().unwrap();
 
-        let segments = sstable::Segment::from_tree(&memtable, &self.lsm_config.sstable_path);
+        if memtable.is_empty() {
+            index::write_index(&self.lsm_config.sstable_path, dense_index.deref());
+            filter::write_filter(
+                &self.lsm_config.sstable_path,
+                self.bloom_filter.read().unwrap().deref(),
+            );
 
-        for token in segments.1 {
-            dense_index.insert(token.0, token.1);
+            Ok(())
+        } else {
+            let segments = sstable::Segment::from_tree(&memtable, &self.lsm_config.sstable_path);
+
+            for token in segments.1 {
+                dense_index.insert(token.0, token.1);
+            }
+
+            index::write_index(&self.lsm_config.sstable_path, dense_index.deref());
+
+            drop(dense_index);
+
+            filter::write_filter(
+                &self.lsm_config.sstable_path,
+                self.bloom_filter.read().unwrap().deref(),
+            );
+
+            self.memtable.write().unwrap().clear();
+            self.memtable_size = 0;
+
+            Ok(())
         }
-
-        index::write_index(&self.lsm_config.sstable_path, dense_index.deref());
-
-        let mut keys = Vec::new();
-
-        for segment in dense_index.deref() {
-            keys.push(segment.0.clone());
-        }
-
-        drop(dense_index);
-
-        filter::write_filter(
-            &self.lsm_config.sstable_path,
-            self.bloom_filter.read().unwrap().deref(),
-        );
-
-        self.memtable.write().unwrap().clear();
-        self.memtable_size = 0;
-
-        Ok(())
     }
 
     pub fn get_memtable(&self) -> BTreeMap<String, bson::Bson> {
@@ -243,27 +238,26 @@ impl Drop for Lsm {
         let memtable = self.memtable.read().unwrap();
         let mut dense_index = self.dense_index.write().unwrap();
 
-        if memtable.is_empty() {
-            return;
+        if memtable.len() == 0 {
+            index::write_index(&self.lsm_config.sstable_path, dense_index.deref());
+            filter::write_filter(
+                &self.lsm_config.sstable_path,
+                self.bloom_filter.read().unwrap().deref(),
+            );
+        } else {
+            let segments =
+                sstable::Segment::from_tree(memtable.deref(), &self.lsm_config.sstable_path);
+
+            for token in segments.1 {
+                dense_index.insert(token.0, token.1);
+            }
+
+            index::write_index(&self.lsm_config.sstable_path, dense_index.deref());
+
+            filter::write_filter(
+                &self.lsm_config.sstable_path,
+                self.bloom_filter.read().unwrap().deref(),
+            );
         }
-
-        let segments = sstable::Segment::from_tree(memtable.deref(), &self.lsm_config.sstable_path);
-
-        for token in segments.1 {
-            dense_index.insert(token.0, token.1);
-        }
-
-        let mut keys = Vec::new();
-
-        for segment in dense_index.deref() {
-            keys.push(segment.0.clone());
-        }
-
-        index::write_index(&self.lsm_config.sstable_path, dense_index.deref());
-
-        filter::write_filter(
-            &self.lsm_config.sstable_path,
-            self.bloom_filter.read().unwrap().deref(),
-        );
     }
 }
