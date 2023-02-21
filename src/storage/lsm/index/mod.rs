@@ -14,10 +14,6 @@ pub fn check_if_index_exists(path: &path::Path) -> bool {
 pub fn write_index(path: &path::Path, index: &HashMap<String, String>) {
     let _path = path.join("index");
 
-    if index.is_empty() {
-        return;
-    }
-
     let doc = bson::to_vec(index).unwrap();
 
     let mut file = fs::File::create(_path).unwrap();
