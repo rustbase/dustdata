@@ -6,12 +6,10 @@ use std::sync::{Arc, RwLock};
 
 use crate::bloom::BloomFilter;
 use crate::dustdata::{Error, ErrorCode, Result};
-
-use self::snapshots::Snapshot;
+use crate::snapshots::Snapshot;
 
 pub mod filter;
 pub mod index;
-pub mod snapshots;
 pub mod sstable;
 mod writer;
 
@@ -26,7 +24,6 @@ pub struct Lsm {
     pub memtable: Arc<RwLock<BTreeMap<String, bson::Bson>>>,
     pub memtable_size: usize,
     pub lsm_config: LsmConfig,
-    pub snapshots: snapshots::SnapshotManager,
     pub dense_index: Arc<RwLock<HashMap<String, String>>>,
     pub bloom_filter: Arc<RwLock<BloomFilter>>,
 }
@@ -51,17 +48,12 @@ impl Lsm {
             std::fs::create_dir_all(&config.sstable_path).unwrap();
         }
 
-        let snapshots = snapshots::SnapshotManager::new(
-            std::path::Path::new(&config.sstable_path).join("snapshots"),
-        );
-
         Lsm {
             memtable: Arc::new(RwLock::new(BTreeMap::new())),
             bloom_filter: Arc::new(RwLock::new(bloom_filter)),
             dense_index: Arc::new(RwLock::new(index)),
             lsm_config: config,
             memtable_size: 0, // The current memtable size (in bytes)
-            snapshots,
         }
     }
 

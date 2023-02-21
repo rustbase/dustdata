@@ -1,10 +1,11 @@
 pub mod bloom;
 mod dustdata;
+pub mod snapshots;
 pub mod storage;
 
 pub use self::{
     dustdata::DustData, dustdata::DustDataConfig, dustdata::Error, dustdata::ErrorCode,
-    dustdata::LsmConfig, dustdata::Result, dustdata::Size, storage::lsm::snapshots,
+    dustdata::LsmConfig, dustdata::Result, dustdata::Size,
 };
 pub use bson;
 

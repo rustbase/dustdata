@@ -1,54 +1,11 @@
+use crate::bloom::BloomFilter;
+use crate::storage::lsm::Lsm;
 use lz4::{Decoder, EncoderBuilder};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::io::{Read, Write};
-use std::path::PathBuf;
-
-use crate::bloom::BloomFilter;
-
-use super::Lsm;
-
-#[derive(Clone, Debug)]
-pub struct SnapshotManager {
-    path: PathBuf,
-}
-
-impl SnapshotManager {
-    pub fn new(path: PathBuf) -> Self {
-        SnapshotManager { path }
-    }
-
-    pub fn load_last_snapshot(&self) -> Snapshot {
-        let mut paths = fs::read_dir(&self.path).unwrap();
-
-        let mut last_snapshot = paths.next().unwrap().unwrap().path();
-
-        for path in paths {
-            let path = path.unwrap().path();
-
-            if path.metadata().unwrap().modified().unwrap()
-                > last_snapshot.metadata().unwrap().modified().unwrap()
-            {
-                last_snapshot = path;
-            }
-        }
-
-        let snapshot: Snapshot = Snapshot::load_snapshot(last_snapshot);
-
-        snapshot
-    }
-
-    pub fn load_snapshot_by_index(&self, index: usize) -> Snapshot {
-        let mut paths = fs::read_dir(&self.path).unwrap();
-
-        let snapshot = paths.nth(index).unwrap().unwrap().path();
-
-        let snapshot: Snapshot = Snapshot::load_snapshot(snapshot);
-
-        snapshot
-    }
-}
+use std::path::Path;
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Snapshot {
@@ -70,20 +27,39 @@ impl Snapshot {
         }
     }
 
-    pub fn load_snapshot(path: PathBuf) -> Snapshot {
+    /// It opens a file, reads it into a buffer, and then deserializes the buffer into a BSON document
+    ///
+    /// Arguments:
+    ///
+    /// * `path`: The path to the file you want to read from.
+    ///
+    /// Returns:
+    ///
+    /// A `Snapshot` struct.
+    pub fn snapshot_from_file(path: &Path) -> Snapshot {
         let file = fs::File::open(path).unwrap();
-
         let mut decoder = Decoder::new(file).unwrap();
-        let mut contents = Vec::new();
-        decoder.read_to_end(&mut contents).unwrap();
-        let snapshot: Snapshot = bson::from_slice(&contents).unwrap();
 
-        snapshot
+        let mut snapshot = Vec::new();
+        decoder.read_to_end(&mut snapshot).unwrap();
+
+        bson::from_slice(&snapshot).unwrap()
     }
 
-    pub fn create_snapshot(lsm: &Lsm, path: PathBuf) -> String {
+    /// It creates a new directory in the path provided, creates a new snapshot, serializes it, and writes
+    /// it to a file
+    ///
+    /// Arguments:
+    ///
+    /// * `lsm`: &Lsm - the LSM tree we want to snapshot
+    /// * `path`: The path to the directory where the snapshot will be saved.
+    ///
+    /// Returns:
+    ///
+    /// A string representing the timestamp of the snapshot.
+    pub fn snapshot_to_file(lsm: &Lsm, path: &Path) -> String {
         if !path.exists() {
-            std::fs::create_dir_all(path.clone()).unwrap();
+            std::fs::create_dir_all(path).unwrap();
         }
 
         let snapshot = Snapshot::new(
@@ -120,10 +96,5 @@ impl Snapshot {
 
     pub fn get_dense_index(&self) -> &HashMap<String, String> {
         &self.dense_index
-    }
-
-    pub fn timestamp(&self) -> String {
-        let now = chrono::Local::now();
-        now.format("%Y-%m-%d-%H-%M-%S").to_string()
     }
 }
