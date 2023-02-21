@@ -221,7 +221,7 @@ impl Lsm {
         keys
     }
 
-    pub fn drop(&mut self) {
+    pub fn clear_with_bloom_filter(&mut self) {
         self.clear();
         self.bloom_filter.write().unwrap().clear();
     }
