@@ -3,60 +3,74 @@ use lz4::{Decoder, EncoderBuilder};
 use std::{
     io::{Read, Write},
     path,
+    sync::{Arc, RwLock},
 };
 
-pub fn check_if_filter_exists(path: &path::Path) -> bool {
-    let _path = path.join("filter");
-
-    _path.exists()
+#[derive(Clone)]
+pub struct Filter {
+    pub bloom: Arc<RwLock<BloomFilter>>,
+    path: path::PathBuf,
 }
 
-pub fn write_filter(path: &path::Path, filter: &BloomFilter) {
-    let _path = path.join("filter");
+impl Filter {
+    pub fn new(path: path::PathBuf) -> Self {
+        let path = path.join("sstable.filter");
+        let bloom_rate = 0.01;
 
-    if !check_if_filter_exists(path) {
-        std::fs::create_dir_all(_path.clone()).unwrap();
+        let bloom_filter = if path.exists() {
+            Filter::read_filter(&path)
+        } else {
+            BloomFilter::new(bloom_rate, 100000)
+        };
+
+        Self {
+            bloom: Arc::new(RwLock::new(bloom_filter)),
+            path,
+        }
     }
 
-    // bitvec
+    fn write_filter(path: &path::Path, filter: &BloomFilter) {
+        let filter_file = std::fs::File::create(path).unwrap();
 
-    let bitvec_file = std::fs::File::create(_path.join("bitvec")).unwrap();
+        let mut encoder = EncoderBuilder::new()
+            .level(4)
+            .build(filter_file)
+            .expect("cannot create encoder");
 
-    let mut encoder = EncoderBuilder::new()
-        .level(4)
-        .build(bitvec_file)
-        .expect("cannot create encoder");
+        let filter_content = bson::to_vec(filter).unwrap();
 
-    encoder.write_all(&filter.bitvec).unwrap();
+        encoder.write_all(&filter_content).unwrap();
+        encoder.flush().unwrap();
+    }
 
-    encoder.flush().unwrap();
+    fn read_filter(path: &path::Path) -> BloomFilter {
+        let filter_file = std::fs::File::open(path).unwrap();
+        let mut decoder = Decoder::new(filter_file).unwrap();
 
-    // hashes
+        let mut filter: Vec<u8> = Vec::new();
+        decoder.read_to_end(&mut filter).unwrap();
 
-    let mut hashes_file = std::fs::File::create(_path.join("hashes")).unwrap();
-    hashes_file.write_all(&filter.hashes.to_le_bytes()).unwrap();
+        bson::from_slice(&filter).unwrap()
+    }
 
-    hashes_file.sync_all().unwrap();
-}
+    pub fn insert(&mut self, key: &str) {
+        self.bloom.write().unwrap().insert(key);
+    }
 
-pub fn read_filter(path: &path::Path) -> BloomFilter {
-    let _path = path.join("filter");
+    pub fn contains(&self, key: &str) -> bool {
+        self.bloom.read().unwrap().contains(key)
+    }
 
-    // bitvec
+    pub fn delete(&mut self, key: &str) {
+        self.bloom.write().unwrap().delete(key);
+    }
 
-    let bitvec_file = std::fs::File::open(_path.join("bitvec")).unwrap();
-    let mut decoder = Decoder::new(bitvec_file).unwrap();
+    pub fn flush(&mut self) {
+        let filter = self.bloom.read().unwrap().clone();
+        Filter::write_filter(&self.path, &filter);
+    }
 
-    let mut bitvec: Vec<u8> = Vec::new();
-    decoder.read_to_end(&mut bitvec).unwrap();
-
-    // hashes
-
-    let mut hashes_file = std::fs::File::open(_path.join("hashes")).unwrap();
-    let mut hashes_read: Vec<u8> = Vec::new();
-    hashes_file.read_to_end(&mut hashes_read).unwrap();
-
-    let hashes = i64::from_le_bytes(hashes_read.try_into().unwrap());
-
-    BloomFilter { bitvec, hashes }
+    pub fn clear(&mut self) {
+        self.bloom.write().unwrap().clear();
+    }
 }

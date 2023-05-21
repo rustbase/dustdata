@@ -16,7 +16,7 @@ exclude = [
 
 
 [dependencies]
-bson = "=2.4.0"
+bson = "2.6.1"
 hex = "0.4.3"
 lz4 = "1.24.0"
 farmhash = "1.1.5"
