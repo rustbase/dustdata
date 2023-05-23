@@ -26,7 +26,7 @@ Add the following to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-dustdata = "1.3.2"
+dustdata = "2.0.0-beta.0"
 ```
 
 # Usage
@@ -35,14 +35,12 @@ Initialize a DustData interface.
 
 ```rust
 // DustData Configuration
-let config = dustdata::DustDataConfig {
-    path: std::path::Path::new("./test_data/dustdata").to_path_buf(),
-    lsm_config: dustdata::LsmConfig {
-        flush_threshold: dustdata::Size::Megabytes(128),
-    }
+let config = LsmConfig {
+    flush_threshold: 10240 // 10KB
+    sstable_path: PathBuf::from("./test_data"),
 };
 
-let mut dustdata = dustdata::initialize(config);
+let dustdata = Lsm::new(config);
 ```
 
 ## Insert a data

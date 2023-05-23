@@ -2,39 +2,70 @@ use std::{
     collections::HashMap,
     fs,
     io::{Read, Write},
+    ops::Deref,
     path,
+    sync::{Arc, RwLock},
 };
 
-pub fn check_if_index_exists(path: &path::Path) -> bool {
-    let _path = path.join("index");
+use fs2::FileExt;
 
-    _path.exists()
+#[derive(Clone)]
+pub struct Index {
+    pub index: Arc<RwLock<HashMap<String, (usize, u64 /* which file and which offset */)>>>,
+    pub index_path: path::PathBuf,
 }
 
-pub fn write_index(path: &path::Path, index: &HashMap<String, String>) {
-    let _path = path.join("index");
+impl Index {
+    pub fn new(index_path: path::PathBuf) -> Self {
+        let index_path = index_path.join("DUSTDATA.index");
 
-    if index.is_empty() {
-        return;
+        let index = if index_path.exists() {
+            Index::read_index(&index_path)
+        } else {
+            HashMap::new()
+        };
+
+        Self {
+            index: Arc::new(RwLock::new(index)),
+            index_path,
+        }
     }
 
-    let doc = bson::to_vec(index).unwrap();
+    fn read_index(path: &path::Path) -> HashMap<String, (usize, u64)> {
+        let mut file = fs::File::open(path).unwrap();
 
-    let mut file = fs::File::create(_path).unwrap();
-    file.write_all(&doc).unwrap();
+        file.lock_exclusive().unwrap();
 
-    file.sync_data().unwrap();
-    file.flush().unwrap();
+        let mut bytes_to_read: Vec<u8> = Vec::new();
+        file.read_to_end(&mut bytes_to_read).unwrap();
+
+        let index_bson: HashMap<String, (usize, u64)> = bson::from_slice(&bytes_to_read).unwrap();
+
+        index_bson
+    }
+
+    pub fn write_index(&self) {
+        let index = self.index.read().unwrap();
+        let doc = bson::to_vec(index.deref()).unwrap();
+
+        let mut file = fs::File::create(self.index_path.clone()).unwrap();
+
+        file.lock_exclusive().unwrap();
+
+        file.write_all(&doc).unwrap();
+
+        file.sync_all().unwrap();
+        file.flush().unwrap();
+        file.unlock().unwrap();
+    }
 }
 
-pub fn read_index(path: &path::Path) -> HashMap<String, String> {
-    let _path = path.join("index");
+impl Drop for Index {
+    fn drop(&mut self) {
+        self.write_index();
 
-    let mut file = fs::File::open(_path).unwrap();
-    let mut bytes_to_read: Vec<u8> = Vec::new();
-    file.read_to_end(&mut bytes_to_read).unwrap();
+        let file = fs::File::open(self.index_path.clone()).unwrap();
 
-    let index_bson: HashMap<String, String> = bson::from_slice(&bytes_to_read).unwrap();
-
-    index_bson
+        file.unlock().unwrap();
+    }
 }
