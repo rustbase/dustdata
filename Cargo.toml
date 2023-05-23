@@ -23,3 +23,4 @@ farmhash = "1.1.5"
 bitvec = "1.0.1"
 serde = {version = "1.0.148", features = ["derive"]}
 chrono = "0.4.23"
+fs2 = "0.4.3"

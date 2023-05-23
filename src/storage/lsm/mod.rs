@@ -4,6 +4,7 @@ use std::{mem, path};
 pub mod error;
 pub mod filter;
 pub mod index;
+pub mod logging;
 pub mod memtable;
 pub mod sstable;
 
@@ -22,13 +23,15 @@ pub struct Lsm {
     pub dense_index: index::Index,
     pub bloom_filter: filter::Filter,
     pub sstable: sstable::SSTable,
+    pub logging: logging::Logging,
 }
 
 impl Lsm {
     pub fn new(lsm_config: LsmConfig) -> Lsm {
-        let dense_index = index::Index::new(lsm_config.sstable_path.join("sstable.index"));
+        let dense_index = index::Index::new(lsm_config.clone().sstable_path);
         let sstable = sstable::SSTable::new(lsm_config.clone().sstable_path);
         let bloom_filter = filter::Filter::new(lsm_config.clone().sstable_path);
+        let logging = logging::Logging::new(lsm_config.clone().sstable_path);
         let memtable = memtable::Memtable::new();
 
         Lsm {
@@ -37,6 +40,7 @@ impl Lsm {
             dense_index,
             sstable,
             lsm_config,
+            logging,
         }
     }
 
@@ -45,6 +49,7 @@ impl Lsm {
             return Err(Error::new(ErrorKind::AlreadyExists));
         }
 
+        self.logging.insert(key, value.clone());
         self.memtable.insert(key, value.clone())?;
         self.bloom_filter.insert(key);
 
@@ -71,13 +76,13 @@ impl Lsm {
         }
     }
 
-    pub fn delete(&mut self, key: &str) -> Result<Option<bson::Bson>> {
+    pub fn delete(&mut self, key: &str) -> Result<bson::Bson> {
         if !self.contains(key) {
             return Err(Error::new(ErrorKind::KeyNotFound));
         }
 
-        let value = self.get(key).unwrap();
-
+        let value = self.get(key).unwrap().unwrap();
+        self.logging.delete(key, value.clone());
         self.memtable.delete(key).ok();
         self.dense_index
             .index
@@ -89,32 +94,27 @@ impl Lsm {
         Ok(value)
     }
 
-    pub fn update(&mut self, key: &str, value: bson::Bson) -> Result<()> {
+    pub fn update(&mut self, key: &str, value: bson::Bson) -> Result<bson::Bson> {
         if !self.contains(key) {
             return Err(Error::new(ErrorKind::KeyNotFound));
         }
 
-        // Delete the old value from the bloom filter
-        self.bloom_filter.delete(key);
+        let old_value = self.get(key)?;
 
-        let mut dense_index = self.dense_index.index.write().unwrap();
-        dense_index.remove(&key.to_string());
-        drop(dense_index);
+        self.logging
+            .update(key, old_value.clone().unwrap(), value.clone());
 
-        self.memtable.insert(key, value)?;
+        self.memtable
+            .table
+            .write()
+            .unwrap()
+            .insert(key.to_string(), value);
 
-        self.bloom_filter.insert(key);
-
-        Ok(())
+        Ok(old_value.unwrap())
     }
 
     pub fn flush(&mut self) -> Result<()> {
-        if self.memtable.is_empty() {
-            self.dense_index.write_index();
-            self.bloom_filter.flush();
-
-            Ok(())
-        } else {
+        if !self.memtable.is_empty() {
             let memtable = self.memtable.get_memtable();
             let segments = sstable::Segment::from_tree(&memtable);
 
@@ -128,14 +128,24 @@ impl Lsm {
 
             drop(dense_index);
 
-            self.dense_index.write_index();
-
-            self.bloom_filter.flush();
-
             self.memtable.clear();
-
-            Ok(())
         }
+
+        self.dense_index.write_index();
+        self.bloom_filter.flush();
+        self.logging.flush();
+
+        Ok(())
+    }
+
+    pub fn rollback(&mut self, offset: u32) -> Result<()> {
+        let reverse_ops = self.logging.rollback(offset);
+
+        for reverse_op in reverse_ops {
+            self.execute_logging_op(reverse_op)?;
+        }
+
+        Ok(())
     }
 
     pub fn contains(&self, key: &str) -> bool {
@@ -161,14 +171,25 @@ impl Lsm {
 
         keys
     }
+
+    fn execute_logging_op(&mut self, op: logging::LogOp) -> Result<()> {
+        match op {
+            logging::LogOp::Insert { key, value } => self.insert(&key, value),
+            logging::LogOp::Delete { key, value: _ } => self.delete(&key),
+            logging::LogOp::Update {
+                key,
+                old_value: _,
+                new_value,
+            } => self.update(&key, new_value),
+        }?;
+
+        Ok(())
+    }
 }
 
 impl Drop for Lsm {
     fn drop(&mut self) {
-        if self.memtable.is_empty() {
-            self.dense_index.write_index();
-            self.bloom_filter.flush();
-        } else {
+        if !self.memtable.is_empty() {
             let memtable = self.memtable.table.read().unwrap();
 
             let segments = sstable::Segment::from_tree(memtable.deref());
@@ -181,9 +202,9 @@ impl Drop for Lsm {
             }
 
             drop(dense_index);
-
-            self.dense_index.write_index();
-            self.bloom_filter.flush();
         }
+
+        self.dense_index.write_index();
+        self.bloom_filter.flush();
     }
 }

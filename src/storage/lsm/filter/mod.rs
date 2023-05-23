@@ -6,6 +6,8 @@ use std::{
     sync::{Arc, RwLock},
 };
 
+use fs2::FileExt;
+
 #[derive(Clone)]
 pub struct Filter {
     pub bloom: Arc<RwLock<BloomFilter>>,
@@ -14,7 +16,7 @@ pub struct Filter {
 
 impl Filter {
     pub fn new(path: path::PathBuf) -> Self {
-        let path = path.join("sstable.filter");
+        let path = path.join("DUSTDATA.filter");
         let bloom_rate = 0.01;
 
         let bloom_filter = if path.exists() {
@@ -32,6 +34,8 @@ impl Filter {
     fn write_filter(path: &path::Path, filter: &BloomFilter) {
         let filter_file = std::fs::File::create(path).unwrap();
 
+        filter_file.lock_exclusive().unwrap();
+
         let mut encoder = EncoderBuilder::new()
             .level(4)
             .build(filter_file)
@@ -41,10 +45,15 @@ impl Filter {
 
         encoder.write_all(&filter_content).unwrap();
         encoder.flush().unwrap();
+
+        encoder.writer().unlock().unwrap();
     }
 
     fn read_filter(path: &path::Path) -> BloomFilter {
         let filter_file = std::fs::File::open(path).unwrap();
+
+        filter_file.lock_exclusive().unwrap();
+
         let mut decoder = Decoder::new(filter_file).unwrap();
 
         let mut filter: Vec<u8> = Vec::new();
@@ -72,5 +81,15 @@ impl Filter {
 
     pub fn clear(&mut self) {
         self.bloom.write().unwrap().clear();
+    }
+}
+
+impl Drop for Filter {
+    fn drop(&mut self) {
+        self.flush();
+
+        let file = std::fs::File::open(self.path.clone()).unwrap();
+
+        file.unlock().unwrap();
     }
 }

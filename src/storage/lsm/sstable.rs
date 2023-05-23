@@ -89,9 +89,6 @@ impl SSTable {
     }
 
     pub fn write_segment_file(&self, segment: Vec<u8>) -> std::io::Result<usize> {
-        let segment_index = get_last_file_index(self.path.clone());
-        let filename = format!("Data_{}.db", segment_index);
-
         // write metadata into segment
         let metadata = bson::doc! {
             "version": env!("CARGO_PKG_VERSION"),
@@ -101,6 +98,9 @@ impl SSTable {
         full_file.extend_from_slice(&bson::to_vec(&metadata).unwrap());
 
         full_file.extend_from_slice(&segment);
+
+        let segment_index = get_last_file_index(self.path.clone());
+        let filename = format!("Data_{}.db", segment_index);
 
         fs::write(self.path.join(filename), full_file)?;
 
