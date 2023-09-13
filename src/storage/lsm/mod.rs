@@ -1,4 +1,3 @@
-use std::ops::Deref;
 use std::{mem, path};
 
 pub mod error;
@@ -68,7 +67,7 @@ impl Lsm {
         match self.memtable.get(key) {
             Some(document) => Ok(Some(document)),
             None => {
-                let dense_index = self.dense_index.index.read().unwrap();
+                let dense_index = &self.dense_index.index;
                 let (file_index, offset) = dense_index.get(&key.to_string()).unwrap();
 
                 self.sstable.get(file_index, offset)
@@ -84,11 +83,7 @@ impl Lsm {
         let value = self.get(key).unwrap().unwrap();
         self.logging.delete(key, value.clone());
         self.memtable.delete(key).ok();
-        self.dense_index
-            .index
-            .write()
-            .unwrap()
-            .remove(&key.to_string());
+        self.dense_index.index.remove(&key.to_string());
         self.bloom_filter.delete(key);
 
         Ok(value)
@@ -104,11 +99,7 @@ impl Lsm {
         self.logging
             .update(key, old_value.clone().unwrap(), value.clone());
 
-        self.memtable
-            .table
-            .write()
-            .unwrap()
-            .insert(key.to_string(), value);
+        self.memtable.table.insert(key.to_string(), value);
 
         Ok(old_value.unwrap())
     }
@@ -120,13 +111,11 @@ impl Lsm {
 
             let file_index = self.sstable.write_segment_file(segments.0).unwrap();
 
-            let mut dense_index = self.dense_index.index.write().unwrap();
-
             for (key, offset) in segments.1 {
-                dense_index.insert(key.to_string(), (file_index, offset));
+                self.dense_index
+                    .index
+                    .insert(key.to_string(), (file_index, offset));
             }
-
-            drop(dense_index);
 
             self.memtable.clear();
         }
@@ -154,18 +143,18 @@ impl Lsm {
 
     pub fn clear(&mut self) {
         self.memtable.clear();
-        self.dense_index.index.write().unwrap().clear();
+        self.dense_index.index.clear();
         self.bloom_filter.clear();
     }
 
     pub fn list_keys(&self) -> Vec<String> {
         let mut keys = Vec::new();
 
-        for key in self.memtable.table.read().unwrap().keys() {
+        for key in self.memtable.table.keys() {
             keys.push(key.clone());
         }
 
-        for key in self.dense_index.index.read().unwrap().keys() {
+        for key in self.dense_index.index.keys() {
             keys.push(key.clone());
         }
 
@@ -190,18 +179,14 @@ impl Lsm {
 impl Drop for Lsm {
     fn drop(&mut self) {
         if !self.memtable.is_empty() {
-            let memtable = self.memtable.table.read().unwrap();
-
-            let segments = sstable::Segment::from_tree(memtable.deref());
+            let segments = sstable::Segment::from_tree(&self.memtable.table);
             let file_index = self.sstable.write_segment_file(segments.0).unwrap();
 
-            let mut dense_index = self.dense_index.index.write().unwrap();
-
             for (key, offset) in segments.1 {
-                dense_index.insert(key.to_string(), (file_index, offset));
+                self.dense_index
+                    .index
+                    .insert(key.to_string(), (file_index, offset));
             }
-
-            drop(dense_index);
         }
 
         self.dense_index.write_index();

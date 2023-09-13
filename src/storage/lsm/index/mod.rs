@@ -2,16 +2,14 @@ use std::{
     collections::HashMap,
     fs,
     io::{Read, Write},
-    ops::Deref,
     path,
-    sync::{Arc, RwLock},
 };
 
 use fs2::FileExt;
 
 #[derive(Clone)]
 pub struct Index {
-    pub index: Arc<RwLock<HashMap<String, (usize, u64 /* which file and which offset */)>>>,
+    pub index: HashMap<String, (usize, u64 /* which file and which offset */)>,
     pub index_path: path::PathBuf,
 }
 
@@ -25,10 +23,7 @@ impl Index {
             HashMap::new()
         };
 
-        Self {
-            index: Arc::new(RwLock::new(index)),
-            index_path,
-        }
+        Self { index, index_path }
     }
 
     fn read_index(path: &path::Path) -> HashMap<String, (usize, u64)> {
@@ -45,8 +40,7 @@ impl Index {
     }
 
     pub fn write_index(&self) {
-        let index = self.index.read().unwrap();
-        let doc = bson::to_vec(index.deref()).unwrap();
+        let doc = bson::to_vec(&self.index).unwrap();
 
         let mut file = fs::File::create(self.index_path.clone()).unwrap();
 

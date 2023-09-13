@@ -3,14 +3,13 @@ use lz4::{Decoder, EncoderBuilder};
 use std::{
     io::{Read, Write},
     path,
-    sync::{Arc, RwLock},
 };
 
 use fs2::FileExt;
 
 #[derive(Clone)]
 pub struct Filter {
-    pub bloom: Arc<RwLock<BloomFilter>>,
+    pub bloom: BloomFilter,
     path: path::PathBuf,
 }
 
@@ -26,7 +25,7 @@ impl Filter {
         };
 
         Self {
-            bloom: Arc::new(RwLock::new(bloom_filter)),
+            bloom: bloom_filter,
             path,
         }
     }
@@ -63,24 +62,23 @@ impl Filter {
     }
 
     pub fn insert(&mut self, key: &str) {
-        self.bloom.write().unwrap().insert(key);
+        self.bloom.insert(key);
     }
 
     pub fn contains(&self, key: &str) -> bool {
-        self.bloom.read().unwrap().contains(key)
+        self.bloom.contains(key)
     }
 
     pub fn delete(&mut self, key: &str) {
-        self.bloom.write().unwrap().delete(key);
+        self.bloom.delete(key);
     }
 
     pub fn flush(&mut self) {
-        let filter = self.bloom.read().unwrap().clone();
-        Filter::write_filter(&self.path, &filter);
+        Filter::write_filter(&self.path, &self.bloom);
     }
 
     pub fn clear(&mut self) {
-        self.bloom.write().unwrap().clear();
+        self.bloom.clear();
     }
 }
 
