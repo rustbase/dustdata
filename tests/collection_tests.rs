@@ -1,4 +1,5 @@
 use dustdata::DustData;
+use serde::{Deserialize, Serialize};
 
 pub fn test_config() -> dustdata::DustDataConfig {
     dustdata::DustDataConfig::default()

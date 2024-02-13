@@ -1,93 +1,68 @@
 [![crates.io](https://img.shields.io/crates/v/dustdata?color=EA4342&style=flat-square)](https://crates.io/crates/dustdata)
 
 # DustData
-
 A data concurrency control storage engine to [Rustbase](https://github.com/rustbase/rustbase)
 
 Join our [community](https://discord.gg/m5ZzWPumbd) and [chat](https://discord.gg/m5ZzWPumbd) with other Rust users.
 
 # ⚠️ Warning
-
 This is a work in progress. The API is not stable yet.
 
 # 🔗 Contribute
-
 [Click here](./CONTRIBUTING.md) to see how to Contribute
 
-# Dependencies
-
-These are dependencies that are required to use the DustData.
-
--   [bson](https://crates.io/crates/bson)
-
 # How to install
-
 Add the following to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-dustdata = "2.0.0-beta.0"
+dustdata = "2.0.0-beta.1"
 ```
 
 # Usage
+Initialize a new `DustData` instance with the default configuration:
+```rust
+use dustdata::DustData;
 
-Initialize a DustData interface.
+let mut dustdata = DustData::new(Default::default()).unwrap();
+```
+
+## Inserting data into a collection
 
 ```rust
-// DustData Configuration
-let config = LsmConfig {
-    flush_threshold: 10240 // 10KB
-    sstable_path: PathBuf::from("./test_data"),
+#[derive(Serialize, Deserialize, Clone, Debug)]
+struct User {
+    name: String,
+    age: i32,
+}
+
+let collection = dustdata.collection::<User>("users");
+
+let user = User {
+    name: "Pedro".to_string(),
+    age: 21,
 };
 
-let dustdata = Lsm::new(config);
+// Creating a new transaction.
+let mut transaction = collection.start();
+
+// Inserting the user into the transaction.
+transaction.insert("user:1", user);
+
+// Committing the transaction.
+collection.commit(&mut transaction).unwrap();
+
+// Done!
 ```
 
-## Insert a data
+## Reading data from a collection
 
 ```rust
-// ...
-// Creating a data
-let data = bson::doc! {
-    "name": "John Doe",
-    "age": 30,
-}
+let collection = dustdata.collection::<User>("users").unwrap();
 
-dustdata.insert("key", data);
+let user = collection.get("user:1").unwrap();
 ```
 
-## Getting a data
-
-```rust
-// ...
-let value = dustdata.get("key").unwrap().unwrap();
-println!("{:?}", value);
-```
-
-## Updating a data
-
-```rust
-// ...
-let data = bson::doc! {
-    "name": "Joe Mamma",
-    "age": 42,
-}
-
-dustdata.update("key", data);
-```
-
-## Deleting a data
-
-```rust
-// ...
-dustdata.delete("key");
-```
-
-# To-dos
-
--   [x] Memtable (06/19/22)
--   [x] SSTable (08/20/22)
--   [x] Snapshots (12/16/22)
 
 # Authors
 
