@@ -1,86 +1,47 @@
 pub mod bloom;
-pub mod storage;
+pub mod collection;
+pub mod config;
+pub mod error;
+
+pub use collection::Collection;
+pub use config::{DustDataConfig, StorageConfig};
 
 pub use bson;
+use error::{Error, Result};
+use serde::{de::DeserializeOwned, Serialize};
+use std::fmt::Debug;
+use std::fs;
 
-#[cfg(test)]
-mod dustdata_tests {
-    use super::*;
+pub struct DustData {
+    config: config::DustDataConfig,
+}
 
-    use storage::lsm::{Lsm, LsmConfig};
+impl DustData {
+    pub fn new(config: config::DustDataConfig) -> Result<Self> {
+        fs::create_dir_all(&config.data_path).ok();
 
-    fn initialize() -> Lsm {
-        let config = LsmConfig {
-            flush_threshold: 100,
-            sstable_path: std::path::PathBuf::from("./test_data"),
-        };
+        if config.data_path.join(".dustdata-lock").exists() {
+            Err(Error::DatabaseLocked)?;
+        } else {
+            fs::File::create(config.data_path.join(".dustdata-lock")).unwrap();
+        }
 
-        Lsm::new(config)
+        Ok(Self { config })
     }
 
-    #[test]
-    fn memtable_test() {
-        let mut dd = initialize();
+    pub fn collection<T>(&self, name: &str) -> collection::Collection<T>
+    where
+        T: Sync + Send + Clone + Debug + Serialize + DeserializeOwned + 'static,
+    {
+        let mut config = self.config.clone();
+        config.data_path.push(name);
 
-        let doc = bson::bson!({
-            "name": "Pedro",
-            "age": 20,
-            "address": {
-                "street": "123 Main St",
-                "city": "New York",
-                "state": "NY",
-                "zip": 10001
-            },
-        });
-
-        dd.insert("user:1", doc).unwrap();
-
-        assert!(dd.contains("user:1"));
-
-        let user = dd.get("user:1").unwrap().unwrap();
-        let user = user.as_document().unwrap();
-
-        let name = user.get("name").unwrap().as_str().unwrap();
-        assert_eq!(name, "Pedro");
-
-        let age = user.get("age").unwrap().as_i32().unwrap();
-        assert_eq!(age, 20);
-
-        dd.delete("user:1").unwrap();
+        collection::Collection::new(config)
     }
+}
 
-    #[test]
-    fn sstable_test() {
-        let mut dd = initialize();
-
-        let doc = bson::bson!({
-            "name": "John",
-            "age": 26,
-            "address": {
-                "street": "123 Main St",
-                "city": "New York",
-                "state": "NY",
-                "zip": 10001
-            },
-        });
-
-        dd.insert("user:2", doc).unwrap();
-
-        assert!(dd.contains("user:2"));
-
-        dd.flush().unwrap();
-
-        assert!(dd.contains("user:2"));
-
-        let user = dd.get("user:2").unwrap().unwrap();
-        let user = user.as_document().unwrap();
-
-        let name = user.get("name").unwrap().as_str().unwrap();
-        assert_eq!(name, "John");
-
-        let age = user.get("age").unwrap().as_i32().unwrap();
-        assert_eq!(age, 26);
-
-        dd.delete("user:2").unwrap();
+impl Drop for DustData {
+    fn drop(&mut self) {
+        fs::remove_file(self.config.data_path.join(".dustdata-lock")).unwrap();
     }
 }

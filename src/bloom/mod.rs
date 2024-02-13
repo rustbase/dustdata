@@ -4,13 +4,13 @@
 use farmhash::hash64_with_seed;
 use serde::{Deserialize, Serialize};
 
-fn num_bits(size: i64, fp_rate: f64) -> i64 {
+fn num_bits(size: usize, fp_rate: f64) -> i64 {
     let num = -1.0f64 * size as f64 * fp_rate.ln();
     let den = 2.0f64.ln().powf(2.0);
     (num / den).ceil() as i64
 }
 
-fn num_hashes(m: i64, n: i64) -> i64 {
+fn num_hashes(m: i64, n: usize) -> i64 {
     ((m as f64 / n as f64) * 2.0f64).ceil() as i64
 }
 
@@ -21,7 +21,7 @@ pub struct BloomFilter {
 }
 
 impl BloomFilter {
-    pub fn new(fp_rate: f64, size: i64) -> Self {
+    pub fn new(fp_rate: f64, size: usize) -> Self {
         let m = num_bits(size, fp_rate);
         let k = num_hashes(m, size);
 
@@ -57,7 +57,7 @@ impl BloomFilter {
         self.bitvec = vec![0; self.bitvec.len()];
     }
 
-    pub fn delete(&mut self, value: &str) {
+    pub fn remove(&mut self, value: &str) {
         for i in 0..self.hashes {
             let index =
                 hash64_with_seed(value.as_bytes(), i as u64) % (self.bitvec.len() as u64 * 8);
