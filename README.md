@@ -33,7 +33,7 @@ let mut dustdata = DustData::new(Default::default()).unwrap();
 #[derive(Serialize, Deserialize, Clone, Debug)]
 struct User {
     name: String,
-    age: i32,
+    age: u32,
 }
 
 let collection = dustdata.collection::<User>("users");

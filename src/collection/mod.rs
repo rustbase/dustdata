@@ -107,6 +107,16 @@ impl<T: Sync + Send + Clone + Debug + Serialize + 'static + DeserializeOwned> Co
         Transaction::new()
     }
 
+    pub fn start_lazy<F>(&self, f: F) -> Result<Transaction<T>>
+    where
+        F: FnOnce(&mut Transaction<T>),
+    {
+        let mut transaction = self.start();
+        f(&mut transaction);
+        self.commit(&mut transaction)?;
+        Ok(transaction)
+    }
+
     /// Commits a transaction
     pub fn commit(&self, transaction: &mut Transaction<T>) -> Result<()> {
         if let TransactionStatus::Committed = transaction.status {
