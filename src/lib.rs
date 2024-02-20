@@ -6,7 +6,7 @@ pub mod error;
 pub use collection::Collection;
 pub use config::{DustDataConfig, StorageConfig};
 
-pub use bson;
+pub use bincode;
 use error::Result;
 use fs2::FileExt;
 use serde::{de::DeserializeOwned, Serialize};
