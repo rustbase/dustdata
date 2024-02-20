@@ -2,15 +2,16 @@ use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone)]
 pub struct DustDataConfig {
-    // pub wal: WALConfig,
+    pub wal: WALConfig,
     pub data_path: PathBuf,
     pub storage: StorageConfig,
 }
 
-// #[derive(Debug, Clone)]
-// pub struct WALConfig {
-//     pub log_path: PathBuf,
-// }
+#[derive(Debug, Clone)]
+pub struct WALConfig {
+    pub log_path: PathBuf,
+    pub max_log_size: u64,
+}
 
 impl Default for DustDataConfig {
     fn default() -> Self {
@@ -21,7 +22,7 @@ impl Default for DustDataConfig {
 impl DustDataConfig {
     pub fn new() -> Self {
         Self {
-            // wal: WALConfig::new(),
+            wal: WALConfig::new(),
             data_path: PathBuf::from("./data"),
             storage: StorageConfig::new(),
         }
@@ -81,23 +82,32 @@ impl StorageConfig {
     }
 }
 
-// impl Default for WALConfig {
-//     fn default() -> Self {
-//         Self::new()
-//     }
-// }
+impl Default for WALConfig {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
-// impl WALConfig {
-//     pub fn new() -> Self {
-//         Self {
-//             log_path: PathBuf::from("./log"),
-//         }
-//     }
+impl WALConfig {
+    pub fn new() -> Self {
+        Self {
+            log_path: PathBuf::from("./log"),
+            max_log_size: 5 * 1024 * 1024, // 5MB
+        }
+    }
 
-//     /// The path to the log file.
-//     /// Default: ./log
-//     pub fn log_path<P: AsRef<Path>>(&mut self, log_path: P) -> &mut Self {
-//         self.log_path = log_path.as_ref().to_path_buf();
-//         self
-//     }
-// }
+    /// The path to the log file relative to the data directory.
+    /// Default: <data_path>/log
+    pub fn log_path<P: AsRef<Path>>(&mut self, log_path: P) -> &mut Self {
+        self.log_path = log_path.as_ref().to_path_buf();
+        self
+    }
+
+    /// The maximum size of the log file.
+    /// Default: 5MB
+    /// This is the maximum size of the log file before it is rotated.
+    pub fn max_log_size(&mut self, max_log_size: u64) -> &mut Self {
+        self.max_log_size = max_log_size;
+        self
+    }
+}

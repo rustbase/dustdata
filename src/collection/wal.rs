@@ -8,8 +8,6 @@ use std::fmt::Debug;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::{fs, path};
 
-const MAX_LOG_SIZE: usize = 5 * 1024 * 1024;
-
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct TransactionLog<T> {
     pub id: usize,
@@ -53,8 +51,8 @@ struct LogFile {
 }
 
 impl LogFile {
-    pub fn new(log_path: &path::Path) -> Self {
-        let id = LogFile::log_chunk(log_path);
+    pub fn new(log_path: &path::Path, max_log_size: u64) -> Self {
+        let id = LogFile::log_chunk(log_path, max_log_size);
 
         let file = fs::OpenOptions::new()
             .create(true)
@@ -65,7 +63,7 @@ impl LogFile {
         Self { id, file }
     }
 
-    fn log_chunk(log_path: &path::Path) -> usize {
+    fn log_chunk(log_path: &path::Path, max_log_size: u64) -> usize {
         let mut id = 0;
 
         loop {
@@ -77,7 +75,7 @@ impl LogFile {
 
             let metadata = fs::metadata(file_path).unwrap();
 
-            if metadata.len() < MAX_LOG_SIZE as u64 {
+            if metadata.len() < max_log_size {
                 break;
             }
 
@@ -96,11 +94,11 @@ pub struct Wal {
 
 impl Wal {
     pub fn new(config: config::DustDataConfig) -> Result<Self> {
-        let log_path = config.data_path.join("log");
+        let log_path = config.data_path.join(&config.wal.log_path);
 
         fs::create_dir_all(&log_path).ok();
 
-        let current_file = LogFile::new(&log_path);
+        let current_file = LogFile::new(&log_path, config.wal.max_log_size);
 
         let index = WALIndex::new(&log_path)?;
 
@@ -222,11 +220,12 @@ impl WALIndex {
             let index = BTreeMap::new();
 
             let bytes = bincode::serialize(&index).unwrap();
-            file.write_all(&bytes).unwrap();
+            file.write_all(&bytes).map_err(Error::IoError)?;
 
             index
         } else {
-            bincode::deserialize_from(&file).unwrap()
+            bincode::deserialize_from(&file)
+                .map_err(|e| Error::CorruptedData(format!("Corrupted wal index: {}", e)))?
         };
 
         Ok(Self { index, index_path })
