@@ -1,3 +1,51 @@
+//! # DustData
+//!
+//! `dustdata` is a data engine written in Rust. It is designed to be fast, reliable and easy to use.
+//! It is a key-value store with support for multiple data types.
+//!
+//! ## Usage
+//! Initialize a new `DustData` instance with the default configuration:
+//! ```rust
+//! use dustdata::DustData;
+//!
+//! let mut dustdata = DustData::new(Default::default()).unwrap();
+//! ```
+//!
+//! ## Inserting data into a collection
+//!
+//! ```rust
+//! #[derive(Serialize, Deserialize, Clone, Debug)]
+//! struct User {
+//!     name: String,
+//!     age: u32,
+//! }
+//!
+//! let collection = dustdata.collection::<User>("users");
+//!
+//! let user = User {
+//!     name: "Pedro".to_string(),
+//!     age: 21,
+//! };
+//!
+//! // Creating a new transaction.
+//! let mut transaction = collection.start();
+//!
+//! // Inserting the user into the transaction.
+//! transaction.insert("user:1", user);
+//!
+//! // Committing the transaction.
+//! collection.commit(&mut transaction).unwrap();
+//!
+//! // Done!
+//! ```
+//! ## Reading data from a collection
+//!
+//! ```rust
+//! let collection = dustdata.collection::<User>("users").unwrap();
+//!
+//! let user = collection.get("user:1").unwrap();
+//! ```
+
 pub mod bloom;
 pub mod collection;
 pub mod config;
