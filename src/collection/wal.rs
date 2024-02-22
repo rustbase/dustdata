@@ -89,7 +89,7 @@ impl LogFile {
 pub struct Wal {
     config: config::DustDataConfig,
     current_file: LogFile,
-    index: WALIndex,
+    pub index: WALIndex,
 }
 
 impl Wal {
@@ -200,7 +200,7 @@ struct WALIndexEntry<T> {
     data: Vec<WalOperation<T>>,
 }
 
-struct WALIndex {
+pub struct WALIndex {
     index: BTreeMap<usize, (usize, usize)>, // tx_id -> (DustDataLog_*, offset)
     index_path: path::PathBuf,
 }

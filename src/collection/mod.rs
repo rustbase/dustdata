@@ -85,7 +85,7 @@ pub enum TransactionStatus {
 pub struct Collection<T: Sync + Send + Clone + Debug + Serialize + DeserializeOwned + 'static> {
     memtable: Memtable<T>,
     storage: Arc<RwLock<storage::Storage>>,
-    wal: Arc<RwLock<wal::Wal>>,
+    pub wal: Arc<RwLock<wal::Wal>>,
 }
 
 type Memtable<T> = Arc<RwLock<HashMap<String, T>>>;
