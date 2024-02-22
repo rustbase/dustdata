@@ -173,6 +173,30 @@ impl<T: Sync + Send + Clone + Debug + Serialize + 'static + DeserializeOwned> Co
         Ok(rollback_transaction)
     }
 
+    /// Resets a transaction.
+    /// This will revert all operations in the transaction without committing it
+    pub fn reset_transaction<R>(&self, transaction: &mut Transaction<T>) -> Result<()> {
+        match transaction.status {
+            TransactionStatus::RolledBack => panic!("Transaction already rolled back"),
+            TransactionStatus::Active => panic!("Transaction not committed"),
+            TransactionStatus::Aborted => panic!("Transaction aborted"),
+            _ => {}
+        }
+
+        let tx_id = transaction.tx_id;
+
+        let mut wal = self.wal.write().map_err(|_| error::Error::Deadlock)?;
+        let revert_transaction = wal.revert::<T>(tx_id).unwrap();
+
+        drop(wal);
+
+        self.execute_operation(&revert_transaction.data).unwrap();
+
+        transaction.status = TransactionStatus::Active;
+
+        Ok(())
+    }
+
     /// Checks if the collection contains a key
     pub fn contains(&self, key: &str) -> Result<bool> {
         Ok(self.storage.read().unwrap().contains(key))
