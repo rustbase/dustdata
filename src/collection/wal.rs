@@ -136,7 +136,7 @@ impl Wal {
         T: Sync + Send + Clone + Debug + Serialize + 'static,
     {
         let offset = self.current_file.file.metadata().unwrap().len() as usize;
-        let bytes = bson::to_vec(&transaction).unwrap();
+        let bytes = Self::serialize_value(&transaction);
 
         self.index
             .write(transaction.id, self.current_file.id, offset);
@@ -158,7 +158,11 @@ impl Wal {
         self.read_by_offset_and_log_chunk(offset, log_chunk)
     }
 
-    pub fn read_by_offset_and_log_chunk<T>(&self, offset: usize, log_chunk: usize) -> Result<T>
+    pub fn read_by_offset_and_log_chunk<T>(
+        &self,
+        offset: usize,
+        log_chunk: usize,
+    ) -> Result<Option<TransactionLog<T>>>
     where
         T: Sync + Send + Clone + Debug + Serialize + 'static + DeserializeOwned,
     {
@@ -174,22 +178,39 @@ impl Wal {
                 _ => Error::IoError(r),
             })?;
 
-        let mut length = [0; 1];
-        file.seek(SeekFrom::Start(offset as u64)).unwrap();
-        file.read_exact(&mut length).unwrap();
+        file.seek(SeekFrom::Start(offset as u64))
+            .map_err(Error::IoError)?;
 
-        let mut value = vec![0; length[0] as usize];
-        file.seek(SeekFrom::Start(offset as u64)).unwrap();
+        let mut length = [0; 8];
+        file.read_exact(&mut length).unwrap();
+        let length = u64::from_le_bytes(length) as usize;
+
+        let mut value = vec![0; length];
         file.read_exact(&mut value).unwrap();
 
-        let value = bson::from_slice(&value).map_err(|e| {
+        println!("Read value: {:x?}", value);
+
+        let value = bincode::deserialize(&value).map_err(|e| {
             Error::CorruptedData(format!(
                 "Corrupted wal log {} and offset {}. Error: {}",
                 filename, offset, e
             ))
         })?;
 
-        Ok(value)
+        Ok(Some(value))
+    }
+
+    fn serialize_value<T>(value: &T) -> Vec<u8>
+    where
+        T: Sync + Send + Clone + Debug + Serialize + 'static,
+    {
+        let mut bytes = Vec::new();
+        let serialized_value = bincode::serialize(value).unwrap();
+
+        bytes.extend_from_slice(&serialized_value.len().to_le_bytes());
+        bytes.extend_from_slice(&serialized_value);
+
+        bytes
     }
 }
 
