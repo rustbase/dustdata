@@ -9,6 +9,8 @@ authors = ["Rustbase"]
 license = "MIT"
 exclude = ["test_data/*", "README.md", "CONTRIBUTING.md", ".editorconfig"]
 
+[lib]
+doctest = false
 
 [dependencies]
 bson = "2.9.0"
