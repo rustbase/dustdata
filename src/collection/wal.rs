@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::io::{Read, Seek, SeekFrom, Write};
+use std::ops::RangeBounds;
 use std::{fs, path};
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -242,10 +243,13 @@ impl WALIndex {
         self.index.keys().next_back().copied()
     }
 
-    pub fn diff(&self, tx_id: usize, other_tx_id: usize) -> Vec<(usize, (usize, usize))> {
+    pub fn diff<R>(&self, tx_id_range: R) -> Vec<(usize, (usize, usize))>
+    where
+        R: RangeBounds<usize>,
+    {
         let mut diff = Vec::new();
 
-        let iter = self.index.range(tx_id..=other_tx_id);
+        let iter = self.index.range(tx_id_range);
 
         for (key, value) in iter {
             diff.push((*key, *value));
