@@ -2,7 +2,6 @@
 // Bloom filter: https://en.wikipedia.org/wiki/Bloom_filter
 
 use farmhash::hash64_with_seed;
-use serde::{Deserialize, Serialize};
 
 fn num_bits(size: usize, fp_rate: f64) -> i64 {
     let num = -1.0f64 * size as f64 * fp_rate.ln();
@@ -14,7 +13,6 @@ fn num_hashes(m: i64, n: usize) -> i64 {
     ((m as f64 / n as f64) * 2.0f64).ceil() as i64
 }
 
-#[derive(Clone, Serialize, Deserialize)]
 pub struct BloomFilter {
     pub bitvec: Vec<u8>,
     pub hashes: i64,

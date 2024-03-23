@@ -1,6 +1,7 @@
 use crate::error::{Error, Result};
 
 use super::{config, Operation, Transaction};
+use flate2::{read::GzDecoder, write::GzEncoder, Compression};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -101,7 +102,11 @@ impl Wal {
 
         let current_file = LogFile::new(&log_path, config.wal.max_log_size);
 
-        let index = WALIndex::new(&log_path)?;
+        let index = WALIndex::new(
+            &log_path,
+            config.wal.compression.is_some(),
+            config.wal.compression.as_ref().map(|c| c.level),
+        )?;
 
         Ok(Self {
             config,
@@ -133,7 +138,7 @@ impl Wal {
 
     pub fn write<T>(&mut self, transaction: TransactionLog<T>)
     where
-        T: Sync + Send + Clone + Debug + Serialize + 'static,
+        T: Sync + Send + Clone + Debug + Serialize + 'static + DeserializeOwned,
     {
         let offset = self.current_file.file.metadata().unwrap().len() as usize;
         let bytes = Self::serialize_value(&transaction);
@@ -178,6 +183,31 @@ impl Wal {
                 _ => Error::IoError(r),
             })?;
 
+        Self::deserialize_value(&mut file, offset, &filename)
+    }
+
+    fn serialize_value<T>(value: &T) -> Vec<u8>
+    where
+        T: Sync + Send + Clone + Debug + Serialize + 'static + DeserializeOwned,
+    {
+        let mut bytes = Vec::new();
+
+        let serialized_value = bincode::serialize(value).unwrap();
+
+        bytes.extend_from_slice(&serialized_value.len().to_le_bytes());
+        bytes.extend_from_slice(&serialized_value);
+
+        bytes
+    }
+
+    fn deserialize_value<T>(
+        file: &mut fs::File,
+        offset: usize,
+        filename: &str,
+    ) -> Result<Option<TransactionLog<T>>>
+    where
+        T: Sync + Send + Clone + Debug + Serialize + 'static + DeserializeOwned,
+    {
         file.seek(SeekFrom::Start(offset as u64))
             .map_err(Error::IoError)?;
 
@@ -188,8 +218,6 @@ impl Wal {
         let mut value = vec![0; length];
         file.read_exact(&mut value).unwrap();
 
-        println!("Read value: {:x?}", value);
-
         let value = bincode::deserialize(&value).map_err(|e| {
             Error::CorruptedData(format!(
                 "Corrupted wal log {} and offset {}. Error: {}",
@@ -198,19 +226,6 @@ impl Wal {
         })?;
 
         Ok(Some(value))
-    }
-
-    fn serialize_value<T>(value: &T) -> Vec<u8>
-    where
-        T: Sync + Send + Clone + Debug + Serialize + 'static,
-    {
-        let mut bytes = Vec::new();
-        let serialized_value = bincode::serialize(value).unwrap();
-
-        bytes.extend_from_slice(&serialized_value.len().to_le_bytes());
-        bytes.extend_from_slice(&serialized_value);
-
-        bytes
     }
 }
 
@@ -225,10 +240,16 @@ struct WALIndexEntry<T> {
 pub struct WALIndex {
     index: BTreeMap<usize, (usize, usize)>, // tx_id -> (DustDataLog_*, offset)
     index_path: path::PathBuf,
+    use_compression: bool,
+    compression_lvl: Option<u32>,
 }
 
 impl WALIndex {
-    pub fn new(path: &path::Path) -> Result<Self> {
+    pub fn new(
+        path: &path::Path,
+        use_compression: bool,
+        compression_lvl: Option<u32>,
+    ) -> Result<Self> {
         let index_path = path.join(WAL_INDEX_FILENAME);
 
         let mut file = fs::OpenOptions::new()
@@ -241,22 +262,57 @@ impl WALIndex {
         let index = if file.metadata().unwrap().len() == 0 {
             let index = BTreeMap::new();
 
-            let bytes = bincode::serialize(&index).unwrap();
+            let bytes = if use_compression {
+                let mut encoder =
+                    GzEncoder::new(Vec::new(), Compression::new(compression_lvl.unwrap()));
+                encoder
+                    .write_all(&bincode::serialize(&index).unwrap())
+                    .unwrap();
+                encoder.finish().unwrap()
+            } else {
+                bincode::serialize(&index).unwrap()
+            };
+
             file.write_all(&bytes).map_err(Error::IoError)?;
 
             index
         } else {
-            bincode::deserialize_from(&file)
-                .map_err(|e| Error::CorruptedData(format!("Corrupted wal index: {}", e)))?
+            let mut bytes = Vec::new();
+
+            file.read_to_end(&mut bytes).map_err(Error::IoError)?;
+
+            if use_compression {
+                let mut decoder = GzDecoder::new(&bytes[..]);
+                let mut decoded_bytes = Vec::new();
+                decoder.read_to_end(&mut decoded_bytes).unwrap();
+                bincode::deserialize(&decoded_bytes).unwrap()
+            } else {
+                bincode::deserialize(&bytes).unwrap()
+            }
         };
 
-        Ok(Self { index, index_path })
+        Ok(Self {
+            index,
+            index_path,
+            use_compression,
+            compression_lvl,
+        })
     }
 
     pub fn write(&mut self, id: usize, log_chunk: usize, offset: usize) {
         self.index.insert(id, (log_chunk, offset));
 
         let bytes = bincode::serialize(&self.index).unwrap();
+
+        let bytes = if self.use_compression {
+            let mut encoder =
+                GzEncoder::new(Vec::new(), Compression::new(self.compression_lvl.unwrap()));
+            encoder.write_all(&bytes).unwrap();
+            encoder.finish().unwrap()
+        } else {
+            bytes
+        };
+
         fs::write(&self.index_path, bytes).unwrap();
     }
 

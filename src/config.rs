@@ -11,6 +11,31 @@ pub struct DustDataConfig {
 pub struct WALConfig {
     pub log_path: PathBuf,
     pub max_log_size: u64,
+    pub compression: Option<CompressionConfig>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CompressionConfig {
+    pub level: u32,
+}
+
+impl Default for CompressionConfig {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl CompressionConfig {
+    pub fn new() -> Self {
+        Self { level: 6 }
+    }
+
+    /// The compression level.
+    /// Default: 6
+    pub fn level(&mut self, level: u32) -> &mut Self {
+        self.level = level;
+        self
+    }
 }
 
 impl Default for DustDataConfig {
@@ -35,10 +60,23 @@ impl DustDataConfig {
         self
     }
 
+    /// The write-ahead log configuration.
+    /// Default: WALConfig::new()
+    pub fn wal<F>(&mut self, f: F) -> &mut Self
+    where
+        F: FnOnce(&mut WALConfig) -> &mut WALConfig,
+    {
+        self.wal = f(&mut self.wal).clone();
+        self
+    }
+
     /// The storage configuration.
     /// Default: StorageConfig::new()
-    pub fn storage(&mut self, storage: StorageConfig) -> &mut Self {
-        self.storage = storage;
+    pub fn storage<F>(&mut self, f: F) -> &mut Self
+    where
+        F: FnOnce(&mut StorageConfig) -> &mut StorageConfig,
+    {
+        self.storage = f(&mut self.storage).clone();
         self
     }
 
@@ -93,6 +131,7 @@ impl WALConfig {
         Self {
             log_path: PathBuf::from("./log"),
             max_log_size: 5 * 1024 * 1024, // 5MB
+            compression: None,
         }
     }
 
@@ -108,6 +147,16 @@ impl WALConfig {
     /// This is the maximum size of the log file before it is rotated.
     pub fn max_log_size(&mut self, max_log_size: u64) -> &mut Self {
         self.max_log_size = max_log_size;
+        self
+    }
+
+    /// The compression configuration for the log file.
+    /// Default: None
+    pub fn compression<F>(&mut self, f: F) -> &mut Self
+    where
+        F: FnOnce(&mut CompressionConfig) -> &mut CompressionConfig,
+    {
+        self.compression = Some(f(&mut CompressionConfig::new()).clone());
         self
     }
 }

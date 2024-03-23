@@ -34,16 +34,7 @@ impl Storage {
         let filter = Filter::new(keys);
 
         let (data_chunk_page, data_chunk_id) = Self::data_chunk(&storage_path, &config);
-        let file = File {
-            file: fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .read(true)
-                .open(storage_path.join(format!("Data_{}_{}.db", data_chunk_page, data_chunk_id)))
-                .map_err(Error::IoError)?,
-            data_chunk_page,
-            data_chunk_id,
-        };
+        let file = File::new(&storage_path, data_chunk_page, data_chunk_id)?;
 
         Ok(Self {
             file,
@@ -64,7 +55,8 @@ impl Storage {
         let segment = Storage::serialize_value(&tuple.value);
 
         self.filter.insert(&tuple.key);
-        let offset = self.file.metadata().unwrap().len() as usize;
+        let offset = self.file.len().unwrap();
+
         let index_entry = IndexEntry {
             offset,
             data_chunk: DataChunk {
@@ -89,7 +81,7 @@ impl Storage {
 
         let segment = Storage::serialize_value(&tuple.value);
 
-        let offset = self.file.metadata().unwrap().len() as usize;
+        let offset = self.file.len().unwrap();
 
         let index_entry = IndexEntry {
             offset,
@@ -98,15 +90,12 @@ impl Storage {
                 id: self.file.data_chunk_id,
             },
         };
-        let old_index_value = self.index.insert(tuple.key, index_entry);
+        let old_index_value = self.index.insert(tuple.key, index_entry).unwrap();
 
         self.file.write_all(&segment).map_err(Error::IoError)?;
 
         let old_value = self
-            .get_tuple_by_offset_and_data_chunk(
-                old_index_value.unwrap().offset,
-                old_index_value.unwrap().data_chunk,
-            )?
+            .get_tuple_by_offset_and_data_chunk(old_index_value.offset, old_index_value.data_chunk)?
             .unwrap();
 
         Ok(old_value)
@@ -145,9 +134,9 @@ impl Storage {
         self.get_tuple_by_offset_and_data_chunk(entry.offset, entry.data_chunk)
     }
 
-    fn get_tuple_by_offset_and_data_chunk<T>(
+    pub fn get_tuple_by_offset_and_data_chunk<T>(
         &self,
-        offset: usize,
+        offset: u64,
         data_chunk: DataChunk,
     ) -> Result<Option<T>>
     where
@@ -165,24 +154,7 @@ impl Storage {
                 _ => Error::IoError(r),
             })?;
 
-        file.seek(SeekFrom::Start(offset as u64))
-            .map_err(Error::IoError)?;
-
-        let mut length = [0; 8];
-        file.read_exact(&mut length).map_err(Error::IoError)?;
-        let length = u64::from_le_bytes(length);
-
-        let mut value = vec![0; length as usize];
-        file.read_exact(&mut value).map_err(Error::IoError)?;
-
-        let value = bincode::deserialize(&value).map_err(|_| {
-            Error::CorruptedData(format!(
-                "Corrupted data chunk {} and offset {}",
-                filename, offset
-            ))
-        })?;
-
-        Ok(Some(value))
+        Ok(Some(Self::deserialize_value(&mut file, offset, &filename)?))
     }
 
     pub fn clear(&mut self) -> Result<()> {
@@ -206,6 +178,29 @@ impl Storage {
         bytes.extend_from_slice(&serialized_value);
 
         bytes
+    }
+
+    fn deserialize_value<T>(file: &mut fs::File, offset: u64, filename: &str) -> Result<T>
+    where
+        T: Sync + Send + Clone + Debug + Serialize + 'static + DeserializeOwned,
+    {
+        file.seek(SeekFrom::Start(offset)).map_err(Error::IoError)?;
+
+        let mut length = [0; 8];
+        file.read_exact(&mut length).map_err(Error::IoError)?;
+        let length = u64::from_le_bytes(length) as usize;
+
+        let mut value = vec![0; length];
+        file.read_exact(&mut value).map_err(Error::IoError)?;
+
+        let value = bincode::deserialize(&value).map_err(|e| {
+            Error::CorruptedData(format!(
+                "Corrupted data chunk {} and offset {}. Error: {}",
+                filename, offset, e
+            ))
+        })?;
+
+        Ok(value)
     }
 
     fn data_chunk(path: &path::Path, config: &config::DustDataConfig) -> (usize, usize) {
@@ -241,12 +236,32 @@ struct File {
 }
 
 impl File {
+    pub fn new(path: &path::Path, data_chunk_page: usize, data_chunk_id: usize) -> Result<Self> {
+        let file = fs::OpenOptions::new()
+            .read(true)
+            .append(true)
+            .create(true)
+            .open(path.join(format!("Data_{}_{}.db", data_chunk_page, data_chunk_id)))
+            .map_err(Error::IoError)?;
+
+        Ok(Self {
+            file,
+            data_chunk_page,
+            data_chunk_id,
+        })
+    }
+
     pub fn write_all(&mut self, bytes: &[u8]) -> std::io::Result<()> {
-        self.file.write_all(bytes)
+        self.file.write_all(bytes)?;
+        Ok(())
     }
 
     pub fn metadata(&self) -> std::io::Result<std::fs::Metadata> {
         self.file.metadata()
+    }
+
+    pub fn len(&self) -> std::io::Result<u64> {
+        self.metadata().map(|m| m.len())
     }
 }
 
@@ -259,12 +274,12 @@ struct Index {
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug)]
 struct IndexEntry {
-    offset: usize,
+    offset: u64,
     data_chunk: DataChunk,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug)]
-struct DataChunk {
+pub struct DataChunk {
     page: usize,
     id: usize,
 }
@@ -319,7 +334,6 @@ impl Drop for Index {
     }
 }
 
-#[derive(Clone)]
 struct Filter {
     bloom: bloom::BloomFilter,
 }

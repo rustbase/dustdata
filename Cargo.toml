@@ -13,7 +13,7 @@ exclude = ["test_data/*", "README.md", "CONTRIBUTING.md", ".editorconfig"]
 doctest = false
 
 [dependencies]
-lz4 = "1.24.0"
+flate2 = "1.0"
 farmhash = "1.1.5"
 bitvec = "1.0.1"
 serde = { version = "1.0.196", features = ["derive"] }

@@ -3,6 +3,7 @@ use dustdata::DustData;
 pub fn test_config() -> dustdata::DustDataConfig {
     dustdata::DustDataConfig::default()
         .data_path("./test_data")
+        .wal(|wal| wal.compression(|compression| compression.level(9)))
         .build()
 }
 

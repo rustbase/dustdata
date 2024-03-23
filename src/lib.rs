@@ -52,7 +52,7 @@ pub mod config;
 pub mod error;
 
 pub use collection::Collection;
-pub use config::{DustDataConfig, StorageConfig};
+pub use config::*;
 
 pub use bincode;
 use error::Result;
