@@ -1,0 +1,8 @@
+#!/usr/bin/env sh
+# Run pre-commit hooks
+
+set -c
+
+cargo test
+
+exit 0

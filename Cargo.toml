@@ -8,6 +8,7 @@ homepage = "https://github.com/rustbase/dustdata"
 authors = ["Rustbase"]
 license = "MIT"
 exclude = ["test_data/*", "README.md", "CONTRIBUTING.md", ".editorconfig"]
+build = "./src/build.rs"
 
 [lib]
 doctest = false
@@ -19,3 +20,6 @@ bitvec = "1.0.1"
 serde = { version = "1.0.196", features = ["derive"] }
 fs2 = "0.4.3"
 bincode = "1.3.3"
+
+[build-dependencies]
+hooky-rs = "1.0.0"

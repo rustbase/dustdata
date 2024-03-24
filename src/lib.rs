@@ -78,6 +78,19 @@ impl DustData {
         Ok(Self { config })
     }
 
+    pub fn try_new(config: config::DustDataConfig) -> Result<Self> {
+        fs::create_dir_all(&config.data_path).ok();
+
+        if !config.data_path.join(".dustdata-lock").exists() {
+            let file = fs::File::create(config.data_path.join(".dustdata-lock")).unwrap();
+
+            file.try_lock_exclusive()
+                .map_err(|_| error::Error::DatabaseLocked)?;
+        }
+
+        Ok(Self { config })
+    }
+
     pub fn collection<T>(&self, name: &str) -> collection::Collection<T>
     where
         T: Sync + Send + Clone + Debug + Serialize + DeserializeOwned + 'static,
@@ -86,6 +99,10 @@ impl DustData {
         config.data_path.push(name);
 
         collection::Collection::new(config)
+    }
+
+    pub fn config(&self) -> &config::DustDataConfig {
+        &self.config
     }
 }
 

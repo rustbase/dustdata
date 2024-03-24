@@ -84,11 +84,13 @@ pub enum TransactionStatus {
 
 pub struct Collection<T: Sync + Send + Clone + Debug + Serialize + DeserializeOwned + 'static> {
     memtable: Memtable<T>,
-    storage: Arc<RwLock<storage::Storage>>,
-    pub wal: Arc<RwLock<wal::Wal>>,
+    storage: Storage,
+    pub wal: Wal,
 }
 
 type Memtable<T> = Arc<RwLock<HashMap<String, T>>>;
+type Storage = Arc<RwLock<storage::Storage>>;
+type Wal = Arc<RwLock<wal::Wal>>;
 
 impl<T: Sync + Send + Clone + Debug + Serialize + 'static + DeserializeOwned> Collection<T> {
     pub fn new(config: config::DustDataConfig) -> Self {
@@ -161,10 +163,10 @@ impl<T: Sync + Send + Clone + Debug + Serialize + 'static + DeserializeOwned> Co
 
         let tx_id = transaction.tx_id;
 
-        let mut wal = self.wal.write().map_err(|_| error::Error::Deadlock)?;
-        let mut rollback_transaction = wal.revert::<T>(tx_id)?;
-
-        drop(wal);
+        let mut rollback_transaction = {
+            let mut wal = self.wal.write().map_err(|_| error::Error::Deadlock)?;
+            wal.revert::<T>(tx_id)?
+        };
 
         self.commit(&mut rollback_transaction)?;
 
