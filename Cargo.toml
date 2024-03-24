@@ -7,7 +7,13 @@ repository = "https://github.com/rustbase/dustdata"
 homepage = "https://github.com/rustbase/dustdata"
 authors = ["Rustbase"]
 license = "MIT"
-exclude = ["test_data/*", "README.md", "CONTRIBUTING.md", ".editorconfig"]
+exclude = [
+    "test_data/*",
+    "README.md",
+    "CONTRIBUTING.md",
+    ".editorconfig",
+    ".cargo/*",
+]
 build = "./src/build.rs"
 
 [lib]
