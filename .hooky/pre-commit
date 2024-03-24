@@ -1,8 +1,11 @@
-#!/usr/bin/env sh
+#!/usr/bin/env bash
 # Run pre-commit hooks
 
-set -c
+set -o errexit
+set -o nounset
+set -o pipefail
 
+rm -rf test_data
 cargo test
 
 exit 0
