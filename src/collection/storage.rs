@@ -1,5 +1,6 @@
 use crate::bloom;
 use crate::error::{Error, Result};
+use flate2::{read::GzDecoder, write::GzEncoder, Compression};
 use serde::Deserialize;
 use serde::{de::DeserializeOwned, Serialize};
 use std::collections::HashMap;
@@ -27,7 +28,11 @@ impl Storage {
 
         std::fs::create_dir_all(&storage_path).ok();
 
-        let index = Index::new(&storage_path)?;
+        let index = Index::new(
+            &storage_path,
+            config.storage.compression.is_some(),
+            config.storage.compression.as_ref().map(|c| c.level),
+        )?;
 
         let keys = index.index.keys().cloned().collect::<Vec<String>>();
 
@@ -270,6 +275,8 @@ const INDEX_FILENAME: &str = ".index-dustdata";
 struct Index {
     index: IndexType,
     path: path::PathBuf,
+    use_compression: bool,
+    compression_lvl: Option<u32>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug)]
@@ -287,10 +294,14 @@ pub struct DataChunk {
 type IndexType = HashMap<String, IndexEntry>; // (Data_*_*.db, offset)
 
 impl Index {
-    pub fn new(data_path: &path::Path) -> Result<Self> {
+    pub fn new(
+        data_path: &path::Path,
+        use_compression: bool,
+        compression_lvl: Option<u32>,
+    ) -> Result<Self> {
         let index_path = data_path.join(INDEX_FILENAME);
 
-        let file = fs::OpenOptions::new()
+        let mut file = fs::OpenOptions::new()
             .read(true)
             .write(true)
             .create(true)
@@ -298,14 +309,44 @@ impl Index {
             .map_err(Error::IoError)?;
 
         let index = if file.metadata().unwrap().len() == 0 {
-            HashMap::new()
+            let index = IndexType::new();
+
+            let bytes = if use_compression {
+                let mut encoder =
+                    GzEncoder::new(Vec::new(), Compression::new(compression_lvl.unwrap()));
+                encoder
+                    .write_all(&bincode::serialize(&index).unwrap())
+                    .unwrap();
+                encoder.finish().unwrap()
+            } else {
+                bincode::serialize(&index).unwrap()
+            };
+
+            file.write_all(&bytes).map_err(Error::IoError)?;
+
+            index
         } else {
-            bincode::deserialize_from(&file).unwrap()
+            let mut bytes = Vec::new();
+
+            file.read_to_end(&mut bytes).map_err(Error::IoError)?;
+
+            let mut decoder = GzDecoder::new(&bytes[..]);
+
+            if decoder.header().is_some() {
+                let mut decoded_bytes = Vec::new();
+                decoder.read_to_end(&mut decoded_bytes).unwrap();
+
+                bincode::deserialize(&decoded_bytes).unwrap()
+            } else {
+                bincode::deserialize(&bytes).unwrap()
+            }
         };
 
         Ok(Self {
             index,
             path: index_path,
+            use_compression,
+            compression_lvl,
         })
     }
 
@@ -329,6 +370,16 @@ impl Index {
 impl Drop for Index {
     fn drop(&mut self) {
         let bytes = bincode::serialize(&self.index).unwrap();
+
+        let bytes = if self.use_compression {
+            let mut encoder =
+                GzEncoder::new(Vec::new(), Compression::new(self.compression_lvl.unwrap()));
+            encoder.write_all(&bytes).unwrap();
+
+            encoder.finish().unwrap()
+        } else {
+            bytes
+        };
 
         fs::write(&self.path, bytes).unwrap();
     }

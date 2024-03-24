@@ -281,10 +281,12 @@ impl WALIndex {
 
             file.read_to_end(&mut bytes).map_err(Error::IoError)?;
 
-            if use_compression {
-                let mut decoder = GzDecoder::new(&bytes[..]);
+            let mut decoder = GzDecoder::new(&bytes[..]);
+
+            if decoder.header().is_some() {
                 let mut decoded_bytes = Vec::new();
                 decoder.read_to_end(&mut decoded_bytes).unwrap();
+
                 bincode::deserialize(&decoded_bytes).unwrap()
             } else {
                 bincode::deserialize(&bytes).unwrap()

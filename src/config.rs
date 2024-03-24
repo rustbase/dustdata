@@ -89,6 +89,7 @@ impl DustDataConfig {
 pub struct StorageConfig {
     pub max_data_chunk_size: usize,
     pub max_data_chunks: usize,
+    pub compression: Option<CompressionConfig>,
 }
 
 impl Default for StorageConfig {
@@ -102,6 +103,7 @@ impl StorageConfig {
         Self {
             max_data_chunk_size: 10 * 1028 * 1028, // 10MB
             max_data_chunks: 10,
+            compression: None,
         }
     }
 
@@ -116,6 +118,16 @@ impl StorageConfig {
     /// Default: 10
     pub fn max_data_chunks(&mut self, max_data_chunks: usize) -> &mut Self {
         self.max_data_chunks = max_data_chunks;
+        self
+    }
+
+    /// The compression configuration for the data chunks and indexes.
+    /// Default: None
+    pub fn compression<F>(&mut self, f: F) -> &mut Self
+    where
+        F: FnOnce(&mut CompressionConfig) -> &mut CompressionConfig,
+    {
+        self.compression = Some(f(&mut CompressionConfig::new()).clone());
         self
     }
 }
@@ -150,7 +162,7 @@ impl WALConfig {
         self
     }
 
-    /// The compression configuration for the log file.
+    /// The compression configuration for the log file and index.
     /// Default: None
     pub fn compression<F>(&mut self, f: F) -> &mut Self
     where
