@@ -1,7 +1,5 @@
 fn main() {
-    let run_hooky = std::env::var("RUN_HOOKY");
-
-    if run_hooky == Ok("true".to_owned()) {
+    if option_env!("CARGO_PRIMARY_PACKAGE").is_some() {
         hooky::init(true)
     }
 }
