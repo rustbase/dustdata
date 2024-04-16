@@ -10,12 +10,14 @@ pub struct DustDataConfig {
 #[derive(Debug, Clone)]
 pub struct WALConfig {
     pub log_path: PathBuf,
+    /// The maximum size of the log file.
     pub max_log_size: u64,
     pub compression: Option<CompressionConfig>,
 }
 
 #[derive(Debug, Clone)]
 pub struct CompressionConfig {
+    /// The compression level.
     pub level: u32,
 }
 
@@ -87,7 +89,9 @@ impl DustDataConfig {
 
 #[derive(Debug, Clone)]
 pub struct StorageConfig {
+    /// The maximum size of a data chunk.
     pub max_data_chunk_size: usize,
+    /// The maximum number of data chunks.
     pub max_data_chunks: usize,
     pub compression: Option<CompressionConfig>,
 }
