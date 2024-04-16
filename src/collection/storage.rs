@@ -34,7 +34,7 @@ impl Storage {
             config.storage.compression.as_ref().map(|c| c.level),
         )?;
 
-        let keys = index.index.keys().cloned().collect::<Vec<String>>();
+        let keys = index.inner.keys().cloned().collect::<Vec<String>>();
 
         let filter = Filter::new(keys);
 
@@ -49,7 +49,7 @@ impl Storage {
         })
     }
 
-    pub fn insert_tuple<T>(&mut self, tuple: StorageTupleEntry<T>) -> Result<()>
+    pub fn insert_tuple<T>(&mut self, tx_id: usize, tuple: StorageTupleEntry<T>) -> Result<()>
     where
         T: Sync + Send + Clone + Debug + Serialize + 'static,
     {
@@ -64,6 +64,7 @@ impl Storage {
 
         let index_entry = IndexEntry {
             offset,
+            tx_id,
             data_chunk: DataChunk {
                 page: self.file.data_chunk_page,
                 id: self.file.data_chunk_id,
@@ -76,7 +77,7 @@ impl Storage {
         Ok(())
     }
 
-    pub fn update_tuple<T>(&mut self, tuple: StorageTupleEntry<T>) -> Result<T>
+    pub fn update_tuple<T>(&mut self, tx_id: usize, tuple: StorageTupleEntry<T>) -> Result<T>
     where
         T: Sync + Send + Clone + Debug + Serialize + 'static + DeserializeOwned,
     {
@@ -90,6 +91,7 @@ impl Storage {
 
         let index_entry = IndexEntry {
             offset,
+            tx_id,
             data_chunk: DataChunk {
                 page: self.file.data_chunk_page,
                 id: self.file.data_chunk_id,
@@ -273,7 +275,7 @@ impl File {
 const INDEX_FILENAME: &str = ".index-dustdata";
 
 struct Index {
-    index: IndexType,
+    inner: IndexType,
     path: path::PathBuf,
     use_compression: bool,
     compression_lvl: Option<u32>,
@@ -283,6 +285,7 @@ struct Index {
 struct IndexEntry {
     offset: u64,
     data_chunk: DataChunk,
+    tx_id: usize,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug)]
@@ -308,7 +311,7 @@ impl Index {
             .open(index_path.clone())
             .map_err(Error::IoError)?;
 
-        let index = if file.metadata().unwrap().len() == 0 {
+        let inner = if file.metadata().unwrap().len() == 0 {
             let index = IndexType::new();
 
             let bytes = if use_compression {
@@ -343,7 +346,7 @@ impl Index {
         };
 
         Ok(Self {
-            index,
+            inner,
             path: index_path,
             use_compression,
             compression_lvl,
@@ -351,25 +354,25 @@ impl Index {
     }
 
     pub fn insert(&mut self, key: String, index_entry: IndexEntry) -> Option<IndexEntry> {
-        self.index.insert(key, index_entry)
+        self.inner.insert(key, index_entry)
     }
 
     pub fn remove(&mut self, key: String) -> Option<IndexEntry> {
-        self.index.remove(&key)
+        self.inner.remove(&key)
     }
 
     pub fn clear(&mut self) {
-        self.index.clear();
+        self.inner.clear();
     }
 
     pub fn get(&self, key: String) -> Option<IndexEntry> {
-        self.index.get(&key).copied()
+        self.inner.get(&key).copied()
     }
 }
 
 impl Drop for Index {
     fn drop(&mut self) {
-        let bytes = bincode::serialize(&self.index).unwrap();
+        let bytes = bincode::serialize(&self.inner).unwrap();
 
         let bytes = if self.use_compression {
             let mut encoder =

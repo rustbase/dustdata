@@ -12,7 +12,7 @@ use std::{fs, path};
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct TransactionLog<T> {
-    pub id: usize,
+    pub tx_id: usize,
     pub data: Vec<WalOperation<T>>,
 }
 
@@ -144,7 +144,7 @@ impl Wal {
         let bytes = Self::serialize_value(&transaction);
 
         self.index
-            .write(transaction.id, self.current_file.id, offset);
+            .write(transaction.tx_id, self.current_file.id, offset);
         self.current_file.file.write_all(&bytes).unwrap();
     }
 
@@ -161,6 +161,19 @@ impl Wal {
         let (log_chunk, offset) = index_tuple.unwrap();
 
         self.read_by_offset_and_log_chunk(offset, log_chunk)
+    }
+
+    pub fn read_head<T>(&self) -> Result<Option<TransactionLog<T>>>
+    where
+        T: Sync + Send + Clone + Debug + Serialize + 'static + DeserializeOwned,
+    {
+        let tx_id = self.index.get_head();
+
+        if tx_id.is_none() {
+            return Ok(None);
+        }
+
+        self.read::<T>(tx_id.unwrap())
     }
 
     pub fn read_by_offset_and_log_chunk<T>(
@@ -238,7 +251,7 @@ struct WALIndexEntry<T> {
 }
 
 pub struct WALIndex {
-    index: BTreeMap<usize, (usize, usize)>, // tx_id -> (DustDataLog_*, offset)
+    pub inner: BTreeMap<usize, (usize, usize)>, // tx_id -> (DustDataLog_*, offset)
     index_path: path::PathBuf,
     use_compression: bool,
     compression_lvl: Option<u32>,
@@ -259,7 +272,7 @@ impl WALIndex {
             .open(index_path.clone())
             .map_err(Error::IoError)?;
 
-        let index = if file.metadata().unwrap().len() == 0 {
+        let inner = if file.metadata().unwrap().len() == 0 {
             let index = BTreeMap::new();
 
             let bytes = if use_compression {
@@ -294,7 +307,7 @@ impl WALIndex {
         };
 
         Ok(Self {
-            index,
+            inner,
             index_path,
             use_compression,
             compression_lvl,
@@ -302,9 +315,9 @@ impl WALIndex {
     }
 
     pub fn write(&mut self, id: usize, log_chunk: usize, offset: usize) {
-        self.index.insert(id, (log_chunk, offset));
+        self.inner.insert(id, (log_chunk, offset));
 
-        let bytes = bincode::serialize(&self.index).unwrap();
+        let bytes = bincode::serialize(&self.inner).unwrap();
 
         let bytes = if self.use_compression {
             let mut encoder =
@@ -319,7 +332,7 @@ impl WALIndex {
     }
 
     pub fn get_head(&self) -> Option<usize> {
-        self.index.keys().next_back().copied()
+        self.inner.keys().next_back().copied()
     }
 
     pub fn diff<R>(&self, tx_id_range: R) -> Vec<(usize, (usize, usize))>
@@ -328,7 +341,7 @@ impl WALIndex {
     {
         let mut diff = Vec::new();
 
-        let iter = self.index.range(tx_id_range);
+        let iter = self.inner.range(tx_id_range);
 
         for (key, value) in iter {
             diff.push((*key, *value));
@@ -337,7 +350,11 @@ impl WALIndex {
         diff
     }
 
+    pub fn keys(&self) -> Vec<usize> {
+        self.inner.keys().copied().collect()
+    }
+
     pub fn get(&self, key: usize) -> Option<(usize, usize)> {
-        self.index.get(&key).copied()
+        self.inner.get(&key).copied()
     }
 }

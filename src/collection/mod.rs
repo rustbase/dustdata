@@ -109,6 +109,12 @@ impl<T: Sync + Send + Clone + Debug + Serialize + 'static + DeserializeOwned> Co
         Transaction::new()
     }
 
+    /// Starts a new transaction and executes the given closure
+    /// Example:
+    /// ```
+    /// let transaction = collection.start_lazy(|tx| {
+    ///    tx.insert("key", "value");
+    /// });
     pub fn start_lazy<F>(&self, f: F) -> Result<Transaction<T>>
     where
         F: FnOnce(&mut Transaction<T>),
@@ -125,12 +131,16 @@ impl<T: Sync + Send + Clone + Debug + Serialize + 'static + DeserializeOwned> Co
             panic!("Transaction already committed");
         }
 
+        if transaction.data.is_empty() {
+            return Ok(());
+        }
+
         let mut wal = self.wal.try_write().map_err(|_| error::Error::Deadlock)?;
 
-        let wal_operations = self.execute_operation(&transaction.data)?;
+        let wal_operations = self.execute_operation(transaction.tx_id, &transaction.data)?;
 
         let transaction_log = TransactionLog {
-            id: transaction.tx_id,
+            tx_id: transaction.tx_id,
             data: wal_operations,
         };
 
@@ -192,7 +202,8 @@ impl<T: Sync + Send + Clone + Debug + Serialize + 'static + DeserializeOwned> Co
 
         drop(wal);
 
-        self.execute_operation(&revert_transaction.data).unwrap();
+        self.execute_operation(tx_id, &revert_transaction.data)
+            .unwrap();
 
         transaction.status = TransactionStatus::Active;
 
@@ -224,7 +235,11 @@ impl<T: Sync + Send + Clone + Debug + Serialize + 'static + DeserializeOwned> Co
         }
     }
 
-    fn execute_operation(&self, operations: &Vec<Operation<T>>) -> Result<Vec<WalOperation<T>>> {
+    fn execute_operation(
+        &self,
+        tx_id: usize,
+        operations: &Vec<Operation<T>>,
+    ) -> Result<Vec<WalOperation<T>>> {
         let mut memtable = self.memtable.write().map_err(|_| error::Error::Deadlock)?;
         let mut storage = self.storage.write().map_err(|_| error::Error::Deadlock)?;
 
@@ -240,7 +255,7 @@ impl<T: Sync + Send + Clone + Debug + Serialize + 'static + DeserializeOwned> Co
                         value: value.clone(),
                     };
 
-                    storage.insert_tuple(tuple_entry)?;
+                    storage.insert_tuple(tx_id, tuple_entry)?;
 
                     WalOperation::Insert {
                         key: key.to_string(),
@@ -264,7 +279,7 @@ impl<T: Sync + Send + Clone + Debug + Serialize + 'static + DeserializeOwned> Co
                         value: value.clone(),
                     };
 
-                    let old_value = storage.update_tuple(tuple_entry)?;
+                    let old_value = storage.update_tuple(tx_id, tuple_entry)?;
 
                     WalOperation::Update {
                         key: key.to_string(),
