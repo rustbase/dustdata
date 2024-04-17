@@ -47,6 +47,7 @@ impl<T: Sync + Send + Clone + Debug + Serialize + 'static + DeserializeOwned> Wa
     }
 }
 
+#[derive(Debug)]
 struct LogFile {
     pub id: usize,
     pub file: fs::File,
@@ -88,6 +89,7 @@ impl LogFile {
     }
 }
 
+#[derive(Debug)]
 pub struct Wal {
     config: config::DustDataConfig,
     current_file: LogFile,
@@ -115,7 +117,40 @@ impl Wal {
         })
     }
 
-    pub fn revert<T>(&mut self, tx_id: usize) -> Result<Transaction<T>>
+    pub fn revert_to<T>(&self, tx_id: usize) -> Result<Vec<Transaction<T>>>
+    where
+        T: Sync + Send + Clone + Debug + Serialize + 'static + DeserializeOwned,
+    {
+        let logs = self.revert_range(tx_id..)?;
+
+        Ok(logs)
+    }
+
+    pub fn revert_range<T, R>(&self, range: R) -> Result<Vec<Transaction<T>>>
+    where
+        R: RangeBounds<usize>,
+        T: Sync + Send + Clone + Debug + Serialize + 'static + DeserializeOwned,
+    {
+        let logs = self.read_range::<T, R>(range)?;
+
+        let mut transactions = Vec::new();
+
+        if let Some(logs) = logs {
+            for log in logs {
+                let mut transaction = Transaction::new();
+
+                for operation in log.data {
+                    transaction.push(operation.reverse_operation());
+                }
+
+                transactions.push(transaction);
+            }
+        }
+
+        Ok(transactions)
+    }
+
+    pub fn revert_transaction<T>(&self, tx_id: usize) -> Result<Transaction<T>>
     where
         T: Sync + Send + Clone + Debug + Serialize + 'static + DeserializeOwned,
     {
@@ -161,6 +196,26 @@ impl Wal {
         let (log_chunk, offset) = index_tuple.unwrap();
 
         self.read_by_offset_and_log_chunk(offset, log_chunk)
+    }
+
+    pub fn read_range<T, R>(&self, tx_id_range: R) -> Result<Option<Vec<TransactionLog<T>>>>
+    where
+        T: Sync + Send + Clone + Debug + Serialize + 'static + DeserializeOwned,
+        R: RangeBounds<usize>,
+    {
+        let keys = self.index.diff(tx_id_range);
+
+        let mut logs = Vec::new();
+
+        for (_, (log_chunk, offset)) in keys {
+            let log = self.read_by_offset_and_log_chunk(offset, log_chunk)?;
+
+            if let Some(log) = log {
+                logs.push(log);
+            }
+        }
+
+        Ok(Some(logs))
     }
 
     pub fn read_head<T>(&self) -> Result<Option<TransactionLog<T>>>
@@ -250,6 +305,7 @@ struct WALIndexEntry<T> {
     data: Vec<WalOperation<T>>,
 }
 
+#[derive(Debug)]
 pub struct WALIndex {
     pub inner: BTreeMap<usize, (usize, usize)>, // tx_id -> (DustDataLog_*, offset)
     index_path: path::PathBuf,

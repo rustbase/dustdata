@@ -1,10 +1,8 @@
 #!/usr/bin/env bash
-# Run pre-commit hooks
 
 set -o errexit
 set -o nounset
 set -o pipefail
 
-. ./tests/run_tests.sh
-
-exit 0
+rm -rf test_data
+cargo test $@

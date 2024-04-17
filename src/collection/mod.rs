@@ -4,6 +4,7 @@ mod wal;
 use crate::config;
 use crate::error::{self, Result};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use std::ops::RangeBounds;
 use std::{
     collections::HashMap,
     fmt::Debug,
@@ -56,6 +57,22 @@ impl<T> Transaction<T> {
     pub fn extend(&mut self, operations: Vec<Operation<T>>) {
         self.data.extend(operations);
     }
+
+    /// Returns the transaction status
+    /// This will return the current status of the transaction
+    pub fn status(&self) -> &TransactionStatus {
+        &self.status
+    }
+
+    /// Returns the transaction id
+    /// This will return the transaction id
+    pub fn tx_id(&self) -> usize {
+        self.tx_id
+    }
+
+    pub fn push(&mut self, operation: Operation<T>) {
+        self.data.push(operation);
+    }
 }
 
 impl<T> Default for Transaction<T> {
@@ -82,6 +99,7 @@ pub enum TransactionStatus {
     Aborted,
 }
 
+#[derive(Clone, Debug)]
 pub struct Collection<T: Sync + Send + Clone + Debug + Serialize + DeserializeOwned + 'static> {
     memtable: Memtable<T>,
     storage: Storage,
@@ -140,7 +158,7 @@ impl<T: Sync + Send + Clone + Debug + Serialize + 'static + DeserializeOwned> Co
         let wal_operations = self.execute_operation(transaction.tx_id, &transaction.data)?;
 
         let transaction_log = TransactionLog {
-            tx_id: transaction.tx_id,
+            tx_id: transaction.tx_id(),
             data: wal_operations,
         };
 
@@ -153,29 +171,48 @@ impl<T: Sync + Send + Clone + Debug + Serialize + 'static + DeserializeOwned> Co
 
     /// Aborts a transaction
     pub fn abort_transaction(&self, transaction: &mut Transaction<T>) {
-        if let TransactionStatus::Committed = transaction.status {
+        if let TransactionStatus::Committed = transaction.status() {
             panic!("Transaction already committed");
         }
 
         transaction.status = TransactionStatus::Aborted;
     }
 
+    /// Rolls back a transaction with a specific range
+    /// This will revert all operations in the transaction
+    /// Returns the reverted transaction
+    pub fn rollback_transaction_range<R>(&self, range: R) -> Result<Vec<Transaction<T>>>
+    where
+        R: RangeBounds<usize>,
+    {
+        let mut rollback_transactions = {
+            let wal = self.wal.read().map_err(|_| error::Error::Deadlock)?;
+            wal.revert_range(range)?
+        };
+
+        for rollback_transaction in rollback_transactions.iter_mut() {
+            self.commit(rollback_transaction)?;
+        }
+
+        Ok(rollback_transactions)
+    }
+
     /// Rolls back a transaction
     /// This will revert all operations in the transaction
     /// Returns the reverted transaction
     pub fn rollback_transaction(&self, transaction: &mut Transaction<T>) -> Result<Transaction<T>> {
-        match transaction.status {
+        match transaction.status() {
             TransactionStatus::RolledBack => panic!("Transaction already rolled back"),
             TransactionStatus::Active => panic!("Transaction not committed"),
             TransactionStatus::Aborted => panic!("Transaction aborted"),
             _ => {}
         }
 
-        let tx_id = transaction.tx_id;
+        let tx_id = transaction.tx_id();
 
         let mut rollback_transaction = {
-            let mut wal = self.wal.write().map_err(|_| error::Error::Deadlock)?;
-            wal.revert::<T>(tx_id)?
+            let wal = self.wal.read().map_err(|_| error::Error::Deadlock)?;
+            wal.revert_transaction::<T>(tx_id)?
         };
 
         self.commit(&mut rollback_transaction)?;
@@ -188,22 +225,21 @@ impl<T: Sync + Send + Clone + Debug + Serialize + 'static + DeserializeOwned> Co
     /// Resets a transaction.
     /// This will revert all operations in the transaction without committing it
     pub fn reset_transaction<R>(&self, transaction: &mut Transaction<T>) -> Result<()> {
-        match transaction.status {
+        match transaction.status() {
             TransactionStatus::RolledBack => panic!("Transaction already rolled back"),
             TransactionStatus::Active => panic!("Transaction not committed"),
             TransactionStatus::Aborted => panic!("Transaction aborted"),
             _ => {}
         }
 
-        let tx_id = transaction.tx_id;
+        let tx_id = transaction.tx_id();
 
-        let mut wal = self.wal.write().map_err(|_| error::Error::Deadlock)?;
-        let revert_transaction = wal.revert::<T>(tx_id).unwrap();
+        let revert_transaction = {
+            let wal = self.wal.read().map_err(|_| error::Error::Deadlock)?;
+            wal.revert_transaction::<T>(tx_id)?
+        };
 
-        drop(wal);
-
-        self.execute_operation(tx_id, &revert_transaction.data)
-            .unwrap();
+        self.execute_operation(tx_id, &revert_transaction.data)?;
 
         transaction.status = TransactionStatus::Active;
 

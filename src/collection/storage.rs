@@ -10,9 +10,10 @@ use std::{fs, path};
 
 use super::config;
 
+#[derive(Debug)]
 pub struct Storage {
     file: File,
-    index: Index,
+    pub index: Index,
     filter: Filter,
     storage_path: path::PathBuf,
 }
@@ -54,7 +55,7 @@ impl Storage {
         T: Sync + Send + Clone + Debug + Serialize + 'static,
     {
         if self.filter.contains(&tuple.key) {
-            return Err(Error::AlreadyExists(tuple.key));
+            return Err(Error::AlreadyExists(format!("Key: {}", tuple.key)));
         }
 
         let segment = Storage::serialize_value(&tuple.value);
@@ -82,7 +83,7 @@ impl Storage {
         T: Sync + Send + Clone + Debug + Serialize + 'static + DeserializeOwned,
     {
         if !self.contains(&tuple.key) {
-            return Err(Error::NotFound(tuple.key));
+            return Err(Error::NotFound(format!("Key: {}", tuple.key)));
         }
 
         let segment = Storage::serialize_value(&tuple.value);
@@ -113,7 +114,7 @@ impl Storage {
         T: Sync + Send + Clone + Debug + Serialize + 'static + DeserializeOwned,
     {
         if !self.contains(&key) {
-            return Err(Error::NotFound(key));
+            return Err(Error::NotFound(format!("Key: {}", key)));
         }
 
         self.filter.remove(&key);
@@ -236,6 +237,7 @@ impl Storage {
     }
 }
 
+#[derive(Debug)]
 struct File {
     file: fs::File,
     data_chunk_page: usize,
@@ -274,15 +276,16 @@ impl File {
 
 const INDEX_FILENAME: &str = ".index-dustdata";
 
-struct Index {
-    inner: IndexType,
+#[derive(Debug)]
+pub struct Index {
+    pub inner: IndexType,
     path: path::PathBuf,
     use_compression: bool,
     compression_lvl: Option<u32>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug)]
-struct IndexEntry {
+pub struct IndexEntry {
     offset: u64,
     data_chunk: DataChunk,
     tx_id: usize,
@@ -294,7 +297,7 @@ pub struct DataChunk {
     id: usize,
 }
 
-type IndexType = HashMap<String, IndexEntry>; // (Data_*_*.db, offset)
+pub type IndexType = HashMap<String, IndexEntry>; // (Data_*_*.db, offset)
 
 impl Index {
     pub fn new(
@@ -388,13 +391,14 @@ impl Drop for Index {
     }
 }
 
+#[derive(Debug)]
 struct Filter {
     bloom: bloom::BloomFilter,
 }
 
 impl Filter {
     pub fn new(keys: Vec<String>) -> Self {
-        let mut bloom = bloom::BloomFilter::new(0.01, (keys.len() + 1) * 8);
+        let mut bloom = bloom::BloomFilter::new(0.01, (keys.len() + 50) * 8);
 
         for key in keys {
             bloom.insert(&key);

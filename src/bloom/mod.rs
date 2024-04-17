@@ -13,6 +13,7 @@ fn num_hashes(m: i64, n: usize) -> i64 {
     ((m as f64 / n as f64) * 2.0f64).ceil() as i64
 }
 
+#[derive(Debug)]
 pub struct BloomFilter {
     pub bitvec: Vec<u8>,
     pub hashes: i64,
