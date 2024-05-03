@@ -8,6 +8,7 @@ pub enum Error {
     NotFound(String),
     CorruptedData(String),
     Other(String),
+    Cannot(String),
 }
 
 impl Debug for Error {
@@ -22,6 +23,7 @@ impl Debug for Error {
             Error::CorruptedData(err) => write!(f, "Corrupted data: {}", err),
             Error::AlreadyExists(message) => write!(f, "{} already exists", message),
             Error::NotFound(message) => write!(f, "{} not found", message),
+            Error::Cannot(message) => write!(f, "cannot {}", message),
         }
     }
 }

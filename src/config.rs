@@ -1,10 +1,19 @@
 use std::path::{Path, PathBuf};
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OpenOptions {
+    /// Open the database in read-only mode.
+    ReadOnly,
+    /// Open the database in read-write mode.
+    ReadWrite,
+}
+
 #[derive(Debug, Clone)]
 pub struct DustDataConfig {
     pub wal: WALConfig,
     pub data_path: PathBuf,
     pub storage: StorageConfig,
+    pub open_options: OpenOptions,
 }
 
 #[derive(Debug, Clone)]
@@ -52,6 +61,7 @@ impl DustDataConfig {
             wal: WALConfig::new(),
             data_path: PathBuf::from("./data"),
             storage: StorageConfig::new(),
+            open_options: OpenOptions::ReadWrite,
         }
     }
 
@@ -79,6 +89,14 @@ impl DustDataConfig {
         F: FnOnce(&mut StorageConfig) -> &mut StorageConfig,
     {
         self.storage = f(&mut self.storage).clone();
+        self
+    }
+
+    /// The open options for the database.
+    /// Default: OpenOptions::ReadWrite
+    /// This is the mode in which the database is opened.
+    pub fn open_options(&mut self, open_options: OpenOptions) -> &mut Self {
+        self.open_options = open_options;
         self
     }
 

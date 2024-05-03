@@ -1,8 +1,8 @@
 mod storage;
 mod wal;
 
-use crate::config;
 use crate::error::{self, Result};
+use crate::{config, OpenOptions};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::ops::RangeBounds;
 use std::{
@@ -103,6 +103,7 @@ pub enum TransactionStatus {
 pub struct Collection<T: Sync + Send + Clone + Debug + Serialize + DeserializeOwned + 'static> {
     memtable: Memtable<T>,
     storage: Storage,
+    config: config::DustDataConfig,
     pub wal: Wal,
 }
 
@@ -118,6 +119,7 @@ impl<T: Sync + Send + Clone + Debug + Serialize + 'static + DeserializeOwned> Co
         Self {
             memtable: Arc::new(RwLock::new(HashMap::new())),
             wal,
+            config,
             storage,
         }
     }
@@ -149,6 +151,12 @@ impl<T: Sync + Send + Clone + Debug + Serialize + 'static + DeserializeOwned> Co
             panic!("Transaction already committed");
         }
 
+        if self.config.open_options == OpenOptions::ReadOnly {
+            return Err(error::Error::Cannot(
+                "commit a transaction, due read-only mode".to_string(),
+            ));
+        }
+
         if transaction.data.is_empty() {
             return Ok(());
         }
@@ -162,7 +170,7 @@ impl<T: Sync + Send + Clone + Debug + Serialize + 'static + DeserializeOwned> Co
             data: wal_operations,
         };
 
-        wal.write(transaction_log);
+        wal.write(transaction_log)?;
 
         transaction.status = TransactionStatus::Committed;
 
@@ -185,6 +193,12 @@ impl<T: Sync + Send + Clone + Debug + Serialize + 'static + DeserializeOwned> Co
     where
         R: RangeBounds<usize>,
     {
+        if self.config.open_options == OpenOptions::ReadOnly {
+            return Err(error::Error::Cannot(
+                "commit a transaction, due read-only mode".to_string(),
+            ));
+        }
+
         let mut rollback_transactions = {
             let wal = self.wal.read().map_err(|_| error::Error::Deadlock)?;
             wal.revert_range(range)?
@@ -206,6 +220,12 @@ impl<T: Sync + Send + Clone + Debug + Serialize + 'static + DeserializeOwned> Co
             TransactionStatus::Active => panic!("Transaction not committed"),
             TransactionStatus::Aborted => panic!("Transaction aborted"),
             _ => {}
+        }
+
+        if self.config.open_options == OpenOptions::ReadOnly {
+            return Err(error::Error::Cannot(
+                "commit a transaction, due read-only mode".to_string(),
+            ));
         }
 
         let tx_id = transaction.tx_id();
@@ -230,6 +250,12 @@ impl<T: Sync + Send + Clone + Debug + Serialize + 'static + DeserializeOwned> Co
             TransactionStatus::Active => panic!("Transaction not committed"),
             TransactionStatus::Aborted => panic!("Transaction aborted"),
             _ => {}
+        }
+
+        if self.config.open_options == OpenOptions::ReadOnly {
+            return Err(error::Error::Cannot(
+                "commit a transaction, due read-only mode".to_string(),
+            ));
         }
 
         let tx_id = transaction.tx_id();

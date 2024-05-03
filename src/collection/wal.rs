@@ -1,4 +1,5 @@
-use crate::error::{Error, Result};
+use crate::error::{self, Error, Result};
+use crate::OpenOptions;
 
 use super::{config, Operation, Transaction};
 use flate2::{read::GzDecoder, write::GzEncoder, Compression};
@@ -171,16 +172,24 @@ impl Wal {
         Ok(transaction)
     }
 
-    pub fn write<T>(&mut self, transaction: TransactionLog<T>)
+    pub fn write<T>(&mut self, transaction: TransactionLog<T>) -> Result<()>
     where
         T: Sync + Send + Clone + Debug + Serialize + 'static + DeserializeOwned,
     {
+        if self.config.open_options == OpenOptions::ReadOnly {
+            return Err(error::Error::Cannot(
+                "commit a transaction, due read-only mode".to_string(),
+            ));
+        }
+
         let offset = self.current_file.file.metadata().unwrap().len() as usize;
         let bytes = Self::serialize_value(&transaction);
 
         self.index
             .write(transaction.tx_id, self.current_file.id, offset);
         self.current_file.file.write_all(&bytes).unwrap();
+
+        Ok(())
     }
 
     pub fn read<T>(&self, tx_id: usize) -> Result<Option<TransactionLog<T>>>
