@@ -61,6 +61,7 @@ use serde::{de::DeserializeOwned, Serialize};
 use std::fmt::Debug;
 use std::fs;
 
+#[derive(Debug, Clone, Default)]
 pub struct DustData {
     config: config::DustDataConfig,
 }
