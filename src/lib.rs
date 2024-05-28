@@ -102,6 +102,16 @@ impl DustData {
         collection::Collection::new(config)
     }
 
+    pub fn drop_collection(&self, name: &str) -> Result<()> {
+        let mut config = self.config.clone();
+        config.data_path.push(name);
+
+        fs::remove_dir_all(config.data_path)
+            .map_err(|_| error::Error::NotFound("collection".to_owned()))?;
+
+        Ok(())
+    }
+
     pub fn config(&self) -> &config::DustDataConfig {
         &self.config
     }
