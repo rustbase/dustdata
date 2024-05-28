@@ -70,8 +70,14 @@ impl<T> Transaction<T> {
         self.tx_id
     }
 
+    /// Pushes an operation to the transaction
     pub fn push(&mut self, operation: Operation<T>) {
         self.data.push(operation);
+    }
+
+    /// Returns the transaction data
+    pub fn data(&self) -> &Vec<Operation<T>> {
+        &self.data
     }
 }
 
