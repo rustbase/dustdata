@@ -1,5 +1,5 @@
-use crate::bloom;
 use crate::error::{Error, Result};
+use bloomfilter::Bloom;
 use flate2::{read::GzDecoder, write::GzEncoder, Compression};
 use serde::Deserialize;
 use serde::{de::DeserializeOwned, Serialize};
@@ -55,13 +55,13 @@ impl Storage {
     where
         T: Sync + Send + Clone + Debug + Serialize + 'static,
     {
-        if self.filter.contains(&tuple.key) {
+        if self.contains(&tuple.key) {
             return Err(Error::AlreadyExists(format!("Key: {}", tuple.key)));
         }
 
         let segment = Storage::serialize_value(&tuple.value);
 
-        self.filter.insert(&tuple.key);
+        self.filter.insert(tuple.key.to_string());
         let offset = self.file.len().unwrap();
 
         let index_entry = IndexEntry {
@@ -118,7 +118,6 @@ impl Storage {
             return Err(Error::NotFound(format!("Key: {}", key)));
         }
 
-        self.filter.remove(&key);
         let entry = self.index.remove(key).unwrap();
 
         let old_value = self
@@ -167,14 +166,13 @@ impl Storage {
     }
 
     pub fn clear(&mut self) -> Result<()> {
-        self.filter.clear();
         self.index.clear();
 
         Ok(())
     }
 
     pub fn contains(&self, key: &str) -> bool {
-        self.filter.contains(key)
+        self.filter.contains(key.to_string())
     }
 
     fn serialize_value<T>(value: &T) -> Vec<u8>
@@ -312,7 +310,7 @@ impl Index {
             .read(true)
             .write(true)
             .create(true)
-            .open(index_path.clone())
+            .open(&index_path)
             .map_err(Error::IoError)?;
 
         let inner = if file.metadata().unwrap().len() == 0 {
@@ -394,33 +392,27 @@ impl Drop for Index {
 
 #[derive(Debug)]
 struct Filter {
-    bloom: bloom::BloomFilter,
+    bloom: Bloom<String>,
 }
+
+const BLOOM_FILTER_SIZE: usize = 100_000;
 
 impl Filter {
     pub fn new(keys: Vec<String>) -> Self {
-        let mut bloom = bloom::BloomFilter::new(0.01, (keys.len() + 50) * 8);
+        let mut bloom = Bloom::new_for_fp_rate(BLOOM_FILTER_SIZE, 0.01);
 
         for key in keys {
-            bloom.insert(&key);
+            bloom.set(&key);
         }
 
         Self { bloom }
     }
 
-    pub fn insert(&mut self, key: &str) {
-        self.bloom.insert(key);
+    pub fn insert(&mut self, key: String) {
+        self.bloom.set(&key);
     }
 
-    pub fn contains(&self, key: &str) -> bool {
-        self.bloom.contains(key)
-    }
-
-    pub fn remove(&mut self, key: &str) {
-        self.bloom.remove(key);
-    }
-
-    pub fn clear(&mut self) {
-        self.bloom.clear();
+    pub fn contains(&self, key: String) -> bool {
+        self.bloom.check(&key)
     }
 }

@@ -46,7 +46,6 @@
 //! let user = collection.get("user:1").unwrap();
 //! ```
 
-pub mod bloom;
 pub mod collection;
 pub mod config;
 pub mod error;
