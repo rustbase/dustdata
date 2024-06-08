@@ -60,6 +60,7 @@ use fs2::FileExt;
 use serde::{de::DeserializeOwned, Serialize};
 use std::fmt::Debug;
 use std::fs;
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Default)]
 pub struct DustData {
@@ -99,7 +100,7 @@ impl DustData {
         let mut config = self.config.clone();
         config.data_path.push(name);
 
-        collection::Collection::new(config)
+        collection::Collection::new(Arc::new(config))
     }
 
     pub fn drop_collection(&self, name: &str) -> Result<()> {

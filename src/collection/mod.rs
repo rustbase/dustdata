@@ -109,7 +109,7 @@ pub enum TransactionStatus {
 pub struct Collection<T: Sync + Send + Clone + Debug + Serialize + DeserializeOwned + 'static> {
     memtable: Memtable<T>,
     storage: Storage,
-    config: config::DustDataConfig,
+    config: Arc<config::DustDataConfig>,
     pub wal: Wal,
 }
 
@@ -118,7 +118,7 @@ type Storage = Arc<RwLock<storage::Storage>>;
 type Wal = Arc<RwLock<wal::Wal>>;
 
 impl<T: Sync + Send + Clone + Debug + Serialize + 'static + DeserializeOwned> Collection<T> {
-    pub fn new(config: config::DustDataConfig) -> Self {
+    pub fn new(config: Arc<config::DustDataConfig>) -> Self {
         let storage = Arc::new(RwLock::new(storage::Storage::new(config.clone()).unwrap()));
         let wal = Arc::new(RwLock::new(wal::Wal::new(config.clone()).unwrap()));
 

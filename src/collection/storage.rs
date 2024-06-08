@@ -6,6 +6,7 @@ use serde::{de::DeserializeOwned, Serialize};
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::io::{prelude::*, SeekFrom};
+use std::sync::Arc;
 use std::{fs, path};
 
 use super::config;
@@ -24,7 +25,7 @@ pub struct StorageTupleEntry<T> {
 }
 
 impl Storage {
-    pub fn new(config: config::DustDataConfig) -> Result<Self> {
+    pub fn new(config: Arc<config::DustDataConfig>) -> Result<Self> {
         let storage_path = config.data_path.join("data");
 
         std::fs::create_dir_all(&storage_path).ok();

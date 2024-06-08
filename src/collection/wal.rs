@@ -9,6 +9,7 @@ use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::ops::RangeBounds;
+use std::sync::Arc;
 use std::{fs, path};
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -92,13 +93,13 @@ impl LogFile {
 
 #[derive(Debug)]
 pub struct Wal {
-    config: config::DustDataConfig,
+    config: Arc<config::DustDataConfig>,
     current_file: LogFile,
     pub index: WALIndex,
 }
 
 impl Wal {
-    pub fn new(config: config::DustDataConfig) -> Result<Self> {
+    pub fn new(config: Arc<config::DustDataConfig>) -> Result<Self> {
         let log_path = config.data_path.join(&config.wal.log_path);
 
         fs::create_dir_all(&log_path).ok();
