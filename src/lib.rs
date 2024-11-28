@@ -61,6 +61,39 @@ use std::fmt::Debug;
 use std::fs;
 use std::sync::Arc;
 
+pub mod btree;
+pub mod page;
+
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Either<L, R> {
+    Left(L),
+    Right(R),
+}
+
+impl<L, R> Either<L, R> {
+    pub fn left(&self) -> Option<&L> {
+        match self {
+            Self::Left(l) => Some(l),
+            _ => None,
+        }
+    }
+
+    pub fn right(&self) -> Option<&R> {
+        match self {
+            Self::Right(r) => Some(r),
+            _ => None,
+        }
+    }
+
+    pub fn is_left(&self) -> bool {
+        matches!(self, Self::Left(_))
+    }
+
+    pub fn is_right(&self) -> bool {
+        matches!(self, Self::Right(_))
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct DustData {
     config: config::DustDataConfig,

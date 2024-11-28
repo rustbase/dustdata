@@ -2,6 +2,7 @@ use std::fmt::Debug;
 
 pub enum Error {
     IoError(std::io::Error),
+    SerializeError(bincode::Error),
     Deadlock,
     DatabaseLocked,
     AlreadyExists(String),
@@ -24,6 +25,7 @@ impl Debug for Error {
             Error::AlreadyExists(message) => write!(f, "{} already exists", message),
             Error::NotFound(message) => write!(f, "{} not found", message),
             Error::Cannot(message) => write!(f, "cannot {}", message),
+            Error::SerializeError(error) => write!(f, "serialize error {}", error),
         }
     }
 }
