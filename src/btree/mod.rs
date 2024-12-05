@@ -462,7 +462,7 @@ mod btree_tests {
         btree.insert(2, 2 * 2).unwrap();
         btree.insert(16, 16 * 2).unwrap();
 
-        assert_eq!(btree.values().unwrap(), vec![24, 12, 4, 32]);
+        assert_eq!(btree.values().unwrap(), vec![4, 12, 24, 32]);
 
         let value = btree.get(&2).unwrap().unwrap();
         assert_eq!(value, 4)
