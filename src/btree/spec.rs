@@ -11,13 +11,13 @@ pub struct BTreeCell<K, V> {
 
 pub const BTREE_PAGE_HEADER_SIZE: u16 = 9;
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, PartialOrd)]
 pub struct BTreePageHeader {
     pub kind: PageType,
     pub right_child: Option<PageNumber>,
 }
 
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Copy, Clone)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Copy, Clone, PartialOrd, Ord)]
 pub enum PageType {
     Leaf = 0,
     Internal = 1,

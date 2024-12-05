@@ -437,7 +437,7 @@ impl<T: Serialize + DeserializeOwned + PartialOrd + Ord + Clone> Page<T> {
         PAGE_HEADER_SIZE
     }
 
-    fn special_size(&self) -> u16 {
+    pub fn special_size(&self) -> u16 {
         PAGE_SIZE - self.header.special
     }
 

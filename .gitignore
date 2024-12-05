@@ -6,3 +6,4 @@ Cargo.lock
 
 # Test folders
 /test_data
+/example

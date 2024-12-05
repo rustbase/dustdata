@@ -248,16 +248,19 @@ impl<
 
         let mut results = Vec::new();
 
-        for index in 0..=node.page.len() {
+        for index in 0..node.page.len() {
             let child = node.child(index)?;
-
-            if node.page.len() / 2 == index {
-                results.extend(node.page.values()?);
-            }
 
             if let Some(child) = child {
                 results.extend(self.cells_from_subtree(child)?)
             }
+
+            results.extend(node.page.read(index)?);
+        }
+
+        let right = node.child(node.page.len())?;
+        if let Some(right) = right {
+            results.extend(self.cells_from_subtree(right)?)
         }
 
         Ok(results)
@@ -290,10 +293,10 @@ impl<
         let page = node.page.compact()?;
 
         self.io
-            .write_page(page_number.into(), &page)
+            .write_page(search.page.into(), &page)
             .map_err(Error::IoError)?;
 
-        self.borrow_if_needed(page_number, parents, key)
+        self.borrow_if_needed(search.page, parents, key)
     }
 
     fn borrow_if_needed(
@@ -326,42 +329,56 @@ impl<
             Either::Left(index) => index,
             Either::Right(index) => index,
         };
+        let sibling_index = match index > 0 {
+            false => index + 1,
+            true => index - 1,
+        };
 
-        let sibling_index = if index > 0 { index - 1 } else { index + 1 };
-        let mut cell = parent.page.read(sibling_index)?.unwrap();
+        let sibling_page_index = parent.child(sibling_index)?.unwrap();
 
         let sibling: BTreeNode<K, V> = self
             .io
-            .read_page(cell.left_child.unwrap().into())
+            .read_page(sibling_page_index.into())
             .map_err(Error::IoError)?
             .try_into()?;
+
         let merged_node_idx = cmp::min(index, sibling_index);
 
-        let mut merged_node = node.merge(sibling)?;
-
-        cell.left_child = merged_node.header.right_child;
-
-        parent.page.delete(sibling_index)?;
+        let cell = parent.page.read(merged_node_idx)?.unwrap();
+        parent.page.delete(merged_node_idx)?;
         let mut parent: BTreeNode<K, V> = parent.page.compact()?.try_into()?;
 
-        merged_node.page.insert(merged_node_idx, cell)?;
+        let mut merged_node = node.merge(sibling, cell)?;
 
         let merged_page_index = self
             .io
             .write_new_page(&merged_node.page)
             .map_err(Error::IoError)?;
 
-        if parent.header.kind == PageType::Root && parent.page.is_empty() {
+        if parent.is_root() && parent.page.is_empty() {
+            merged_node.header.kind = PageType::Root;
+            merged_node
+                .page
+                .write_special(&merged_node.header.to_bytes())?;
+
+            self.io
+                .write_page(merged_page_index.into(), &merged_node.page)
+                .map_err(Error::IoError)?;
+
             self.root = merged_page_index
         } else {
-            parent.set_child(sibling_index, merged_page_index)?;
+            parent.set_child(merged_node_idx, merged_page_index)?;
         }
 
         self.io
             .write_page(parent_index.into(), &parent.page)
             .map_err(Error::IoError)?;
 
-        self.borrow_if_needed(parents.pop().unwrap(), parents, key)
+        if let Some(parent) = parents.pop() {
+            self.borrow_if_needed(parent, parents, key)?;
+        }
+
+        Ok(())
     }
 }
 

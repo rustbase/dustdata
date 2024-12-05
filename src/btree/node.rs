@@ -37,6 +37,10 @@ impl<
         }
     }
 
+    pub fn is_root(&self) -> bool {
+        self.header.kind == PageType::Root
+    }
+
     pub fn split(mut self, b: u16) -> Result<BTreeNodeSplited<K, V>> {
         // split page cells at the middle
         let mut sibling_cells = self.page.split_off(b - 1)?;
@@ -94,15 +98,52 @@ impl<
         Ok(())
     }
 
-    pub fn merge(mut self, mut node: Self) -> Result<Self> {
-        let node_values = node.page.values()?;
-        self.page.write_all(node_values)?;
+    pub fn max_key(&mut self) -> Result<Option<K>> {
+        if self.page.is_empty() {
+            return Ok(None);
+        }
 
-        self.header.right_child = node.header.right_child;
+        Ok(self.page.read(self.page.len() - 1)?.map(|e| e.key))
+    }
 
-        self.page.write_special(&self.header.to_bytes())?;
+    pub fn min_key(&mut self) -> Result<Option<K>> {
+        if self.page.is_empty() {
+            return Ok(None);
+        }
 
-        Ok(self)
+        Ok(self.page.read(0)?.map(|e| e.key))
+    }
+
+    pub fn merge(mut self, mut other: Self, mut cell: BTreeCell<K, V>) -> Result<Self> {
+        let new_page_header = BTreePageHeader::new(self.header.kind, None);
+        match self.min_key()? >= other.min_key()? {
+            // merge with left sibling node
+            true => {
+                cell.left_child = other.header.right_child;
+            }
+            // merge with right sibling node
+            false => {
+                cell.left_child = self.header.right_child;
+                self.header.right_child = other.header.right_child
+            }
+        };
+
+        let node_values = self.page.values()?.into_iter();
+        let other_values = other.page.values()?.into_iter();
+
+        let mut merged_values = node_values
+            .chain(other_values)
+            .collect::<Vec<BTreeCell<K, V>>>();
+
+        merged_values.push(cell);
+
+        merged_values.sort_by(|a, b| a.key.cmp(&b.key));
+
+        let mut page: Page<BTreeCell<K, V>> = Page::create(self.page.special_size())?;
+        page.write_all(merged_values)?;
+        page.write_special(&new_page_header.to_bytes())?;
+
+        page.try_into()
     }
 }
 
