@@ -449,12 +449,22 @@ impl<
     }
 }
 
-// #[cfg(test)]
-// mod btree_tests {
-//     use super::*;
+#[cfg(test)]
+mod btree_tests {
+    use super::*;
 
-//     #[test]
-//     fn create_btree() {
-//         let mut btree = BTree::<u32, String>::new("test_data/btree").unwrap();
-//     }
-// }
+    #[test]
+    fn create_btree() {
+        let mut btree = BTree::<u32, u32>::new("test_data/btree").unwrap();
+
+        btree.insert(12, 12 * 2).unwrap();
+        btree.insert(6, 6 * 2).unwrap();
+        btree.insert(2, 2 * 2).unwrap();
+        btree.insert(16, 16 * 2).unwrap();
+
+        assert_eq!(btree.values().unwrap(), vec![24, 12, 4, 32]);
+
+        let value = btree.get(&2).unwrap().unwrap();
+        assert_eq!(value, 4)
+    }
+}

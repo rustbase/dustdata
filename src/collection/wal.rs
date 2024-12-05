@@ -253,13 +253,7 @@ impl Wal {
         let mut file = fs::OpenOptions::new()
             .read(true)
             .open(self.config.data_path.join("log").join(&filename))
-            .map_err(|r| match r.kind() {
-                std::io::ErrorKind::NotFound => Error::CorruptedData(format!(
-                    "WAL Log {} not found, but wal index contains it",
-                    filename
-                )),
-                _ => Error::IoError(r),
-            })?;
+            .map_err(Error::IoError)?;
 
         Self::deserialize_value(&mut file, offset, &filename)
     }
@@ -296,12 +290,7 @@ impl Wal {
         let mut value = vec![0; length];
         file.read_exact(&mut value).unwrap();
 
-        let value = bincode::deserialize(&value).map_err(|e| {
-            Error::CorruptedData(format!(
-                "Corrupted wal log {} and offset {}. Error: {}",
-                filename, offset, e
-            ))
-        })?;
+        let value = bincode::deserialize(&value).map_err(Error::SerializeError)?;
 
         Ok(Some(value))
     }

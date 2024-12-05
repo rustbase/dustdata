@@ -154,13 +154,7 @@ impl Storage {
         let mut file = fs::OpenOptions::new()
             .read(true)
             .open(self.storage_path.join(filename.clone()))
-            .map_err(|r| match r.kind() {
-                std::io::ErrorKind::NotFound => Error::CorruptedData(format!(
-                    "Data chunk {} not found, but index contains it",
-                    filename
-                )),
-                _ => Error::IoError(r),
-            })?;
+            .map_err(Error::IoError)?;
 
         Ok(Some(Self::deserialize_value(&mut file, offset, &filename)?))
     }
@@ -200,12 +194,7 @@ impl Storage {
         let mut value = vec![0; length];
         file.read_exact(&mut value).map_err(Error::IoError)?;
 
-        let value = bincode::deserialize(&value).map_err(|e| {
-            Error::CorruptedData(format!(
-                "Corrupted data chunk {} and offset {}. Error: {}",
-                filename, offset, e
-            ))
-        })?;
+        let value = bincode::deserialize(&value).map_err(Error::SerializeError)?;
 
         Ok(value)
     }

@@ -7,7 +7,7 @@ pub enum Error {
     DatabaseLocked,
     AlreadyExists(String),
     NotFound(String),
-    CorruptedData(String),
+    CorruptedData(CorruptedDataError),
     Other(String),
     Cannot(String),
 }
@@ -21,12 +21,29 @@ impl Debug for Error {
                 write!(f, "Database is locked, maybe another instance is running?")
             }
             Error::Other(err) => write!(f, "Other Error: {}", err),
-            Error::CorruptedData(err) => write!(f, "Corrupted data: {}", err),
+            Error::CorruptedData(err) => write!(f, "{:?}", err),
             Error::AlreadyExists(message) => write!(f, "{} already exists", message),
             Error::NotFound(message) => write!(f, "{} not found", message),
             Error::Cannot(message) => write!(f, "cannot {}", message),
             Error::SerializeError(error) => write!(f, "serialize error {}", error),
         }
+    }
+}
+
+pub struct CorruptedDataError {
+    pub kind: CorruptedDataKind,
+    pub message: String,
+}
+
+#[derive(Debug)]
+pub enum CorruptedDataKind {
+    ChecksumNotMatch,
+    UnsyncWithWAL,
+}
+
+impl Debug for CorruptedDataError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Corrupted data: {}. {:?}", self.message, self.kind)
     }
 }
 

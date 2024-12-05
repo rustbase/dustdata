@@ -5,9 +5,10 @@ use std::{
 };
 
 use crate::{
-    error::{Error, Result},
+    error::{CorruptedDataError, CorruptedDataKind, Error, Result},
     Either,
 };
+use crc32fast::Hasher;
 use layout::{CellPointerFlags, CellPointerMetadata, PageHeader};
 use serde::{de::DeserializeOwned, Serialize};
 use spec::{LocationOffset, CELL_POINTER_SIZE, PAGE_FREE_SPACE_BYTE, PAGE_HEADER_SIZE, PAGE_SIZE};
@@ -35,28 +36,45 @@ impl<T: Serialize + DeserializeOwned + PartialOrd + Ord + Clone> Page<T> {
             upper,
             lower,
             special,
+            checksum: 0,
         };
 
         let header_bytes = bincode::serialize(&header).map_err(Error::SerializeError)?;
         io.seek(SeekFrom::Start(0)).map_err(Error::IoError)?;
         io.write(&header_bytes).map_err(Error::IoError)?;
 
-        Ok(Page {
+        let mut page: Page<T> = Page {
             header,
             io,
             _t: PhantomData,
-        })
+        };
+
+        // update checksum
+        page.write_header()?;
+
+        Ok(page)
     }
 
     pub fn open(data: [u8; PAGE_SIZE as usize]) -> Result<Self> {
         let mut io = Cursor::new(data);
         let header = Self::read_header(&mut io)?;
 
-        Ok(Self {
+        let page = Self {
             io,
-            header,
+            header: header.clone(),
             _t: PhantomData,
-        })
+        };
+
+        let checksum = page.checksum();
+
+        if header.checksum != checksum {
+            return Err(Error::CorruptedData(CorruptedDataError {
+                kind: CorruptedDataKind::ChecksumNotMatch,
+                message: "checksum does not match".to_string(),
+            }));
+        }
+
+        Ok(page)
     }
 
     pub fn write(&mut self, data: T) -> Result<(LocationOffset, LocationOffset)> {
@@ -442,6 +460,9 @@ impl<T: Serialize + DeserializeOwned + PartialOrd + Ord + Clone> Page<T> {
     }
 
     fn write_header(&mut self) -> Result<()> {
+        let checksum = self.checksum();
+        self.header.checksum = checksum;
+
         let buffer = bincode::serialize(&self.header).map_err(Error::SerializeError)?;
 
         self.io.seek(SeekFrom::Start(0)).map_err(Error::IoError)?;
@@ -457,6 +478,12 @@ impl<T: Serialize + DeserializeOwned + PartialOrd + Ord + Clone> Page<T> {
         io.read(&mut buffer).map_err(Error::IoError)?;
 
         bincode::deserialize(&buffer).map_err(Error::SerializeError)
+    }
+
+    fn checksum(&self) -> u32 {
+        let mut hasher = Hasher::new();
+        hasher.update(&self.io.get_ref()[PAGE_HEADER_SIZE..]);
+        hasher.finalize()
     }
 }
 
@@ -588,5 +615,18 @@ mod page_tests {
         let value = page.read(0).unwrap().unwrap();
 
         assert_eq!(value, 90);
+    }
+
+    #[test]
+    fn page_checksum() {
+        let mut page = Page::<u32>::create(0).unwrap();
+
+        page.write(99).unwrap();
+
+        let mut page_bytes = page.to_bytes().unwrap();
+        //change a random byte
+        page_bytes[26] = 2u8;
+
+        Page::<u32>::open(page_bytes).err().unwrap();
     }
 }

@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct PageHeader {
+    pub checksum: u32,
     pub lower: LocationOffset,
     pub upper: LocationOffset,
     pub special: LocationOffset,
