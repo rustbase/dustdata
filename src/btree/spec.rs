@@ -1,6 +1,15 @@
 use serde::{Deserialize, Serialize};
+use std::mem;
 
 use crate::page::spec::PageNumber;
+
+pub const BTREE_BLOCK_ALLOC_SIZE: usize = mem::size_of::<BTreeBlockHeader>();
+
+#[derive(Clone, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize, Debug)]
+pub struct BTreeBlockHeader {
+    pub root: PageNumber,
+    pub b: u16,
+}
 
 #[derive(Clone, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize, Debug)]
 pub struct BTreeCell<K, V> {
