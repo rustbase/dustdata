@@ -28,6 +28,8 @@ pub struct WALConfig {
 pub struct CompressionConfig {
     /// The compression level.
     pub level: u32,
+    /// Enable compression
+    pub enabled: bool,
 }
 
 impl Default for CompressionConfig {
@@ -38,13 +40,23 @@ impl Default for CompressionConfig {
 
 impl CompressionConfig {
     pub fn new() -> Self {
-        Self { level: 6 }
+        Self {
+            level: 6,
+            enabled: false,
+        }
     }
 
     /// The compression level.
     /// Default: 6
     pub fn level(&mut self, level: u32) -> &mut Self {
         self.level = level;
+        self
+    }
+
+    /// Enable compression
+    /// Default: true
+    pub fn enabled(&mut self, enabled: bool) -> &mut Self {
+        self.enabled = enabled;
         self
     }
 }

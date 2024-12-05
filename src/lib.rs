@@ -46,9 +46,12 @@
 //! let user = collection.get("user:1").unwrap();
 //! ```
 
+pub mod btree;
 pub mod collection;
 pub mod config;
 pub mod error;
+pub mod page;
+mod ser_de;
 
 pub use collection::Collection;
 pub use config::*;
@@ -60,9 +63,6 @@ use serde::{de::DeserializeOwned, Serialize};
 use std::fmt::Debug;
 use std::fs;
 use std::sync::Arc;
-
-pub mod btree;
-pub mod page;
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Either<L, R> {

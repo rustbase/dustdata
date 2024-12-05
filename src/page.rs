@@ -6,6 +6,7 @@ use std::{
 
 use crate::{
     error::{CorruptedDataError, CorruptedDataKind, Error, Result},
+    ser_de::{deserialize, serialize},
     Either,
 };
 use crc32fast::Hasher;
@@ -78,7 +79,7 @@ impl<T: Serialize + DeserializeOwned + PartialOrd + Ord + Clone> Page<T> {
     }
 
     pub fn write(&mut self, data: T) -> Result<(LocationOffset, LocationOffset)> {
-        let data = bincode::serialize(&data).map_err(Error::SerializeError)?;
+        let data = serialize(&data)?;
 
         // cell_addr is the position of the cell in the page
         let cell_addr: LocationOffset = self.header.upper - data.len() as LocationOffset;
@@ -130,7 +131,7 @@ impl<T: Serialize + DeserializeOwned + PartialOrd + Ord + Clone> Page<T> {
         index: LocationOffset,
         data: T,
     ) -> Result<(LocationOffset, LocationOffset)> {
-        let data = bincode::serialize(&data).map_err(Error::SerializeError)?;
+        let data = serialize(&data)?;
 
         let offset = self.index_to_offset(index);
 
@@ -188,7 +189,7 @@ impl<T: Serialize + DeserializeOwned + PartialOrd + Ord + Clone> Page<T> {
     }
 
     pub fn replace(&mut self, index: LocationOffset, data: T) -> Result<T> {
-        let data = bincode::serialize(&data).map_err(Error::SerializeError)?;
+        let data = serialize(&data)?;
 
         let offset = self.index_to_offset(index);
 
@@ -259,7 +260,7 @@ impl<T: Serialize + DeserializeOwned + PartialOrd + Ord + Clone> Page<T> {
             .map_err(Error::IoError)?;
         buffer.read_exact(&mut data).unwrap();
 
-        let data = bincode::deserialize(&data).map_err(Error::SerializeError)?;
+        let data = deserialize(&data)?;
 
         Ok(Some(data))
     }
