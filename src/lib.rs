@@ -47,22 +47,20 @@
 //! ```
 
 pub mod btree;
-pub mod collection;
+// pub mod collection;
 pub mod config;
 pub mod error;
 pub mod page;
-mod ser_de;
+mod serializer;
 
-pub use collection::Collection;
+// pub use collection::Collection;
 pub use config::*;
 
 pub use bincode;
 use error::Result;
-use fs2::FileExt;
 use serde::{de::DeserializeOwned, Serialize};
 use std::fmt::Debug;
 use std::fs;
-use std::sync::Arc;
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Either<L, R> {
@@ -95,65 +93,30 @@ impl<L, R> Either<L, R> {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct DustData {
-    config: config::DustDataConfig,
-}
+pub struct DustData;
 
 impl DustData {
-    pub fn new(config: config::DustDataConfig) -> Result<Self> {
-        fs::create_dir_all(&config.data_path).ok();
+    // pub fn new() -> Result<Self> {
+    //     let dustdata_config = dustdata_config();
 
-        if !config.data_path.join(".dustdata-lock").exists() {
-            let file = fs::File::create(config.data_path.join(".dustdata-lock")).unwrap();
+    //     fs::create_dir_all(&dustdata_config.data_path).ok();
 
-            file.lock_exclusive().unwrap();
-        }
+    //     Ok(Self)
+    // }
 
-        Ok(Self { config })
-    }
+    // pub fn collection<T>(&self, name: &str) -> Result<collection::Collection<T>>
+    // where
+    //     T: Sync + Send + Clone + Debug + Serialize + DeserializeOwned + 'static + Ord,
+    // {
+    //     collection::Collection::new(name)
+    // }
 
-    pub fn try_new(config: config::DustDataConfig) -> Result<Self> {
-        fs::create_dir_all(&config.data_path).ok();
+    // pub fn drop_collection(&self, name: &str) -> Result<()> {
+    //     let dustdata_config = dustdata_config();
 
-        if !config.data_path.join(".dustdata-lock").exists() {
-            let file = fs::File::create(config.data_path.join(".dustdata-lock")).unwrap();
+    //     fs::remove_dir_all(dustdata_config.data_path.join(name))
+    //         .map_err(|_| error::Error::NotFound("collection".to_owned()))?;
 
-            file.try_lock_exclusive()
-                .map_err(|_| error::Error::DatabaseLocked)?;
-        }
-
-        Ok(Self { config })
-    }
-
-    pub fn collection<T>(&self, name: &str) -> collection::Collection<T>
-    where
-        T: Sync + Send + Clone + Debug + Serialize + DeserializeOwned + 'static,
-    {
-        let mut config = self.config.clone();
-        config.data_path.push(name);
-
-        collection::Collection::new(Arc::new(config))
-    }
-
-    pub fn drop_collection(&self, name: &str) -> Result<()> {
-        let mut config = self.config.clone();
-        config.data_path.push(name);
-
-        fs::remove_dir_all(config.data_path)
-            .map_err(|_| error::Error::NotFound("collection".to_owned()))?;
-
-        Ok(())
-    }
-
-    pub fn config(&self) -> &config::DustDataConfig {
-        &self.config
-    }
-}
-
-impl Drop for DustData {
-    fn drop(&mut self) {
-        let file = fs::File::open(self.config.data_path.join(".dustdata-lock")).unwrap();
-
-        file.unlock().unwrap();
-    }
+    //     Ok(())
+    // }
 }

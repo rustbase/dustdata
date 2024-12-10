@@ -1,5 +1,7 @@
 use std::fmt::Debug;
 
+use glob::PatternError;
+
 pub enum Error {
     IoError(std::io::Error),
     SerializeError(bincode::Error),
@@ -10,6 +12,7 @@ pub enum Error {
     CorruptedData(CorruptedDataError),
     Other(String),
     Cannot(String),
+    PatternError(PatternError),
 }
 
 impl Debug for Error {
@@ -26,6 +29,7 @@ impl Debug for Error {
             Error::NotFound(message) => write!(f, "{} not found", message),
             Error::Cannot(message) => write!(f, "cannot {}", message),
             Error::SerializeError(error) => write!(f, "serialize error {}", error),
+            Error::PatternError(error) => write!(f, "pattern error {}", error),
         }
     }
 }

@@ -41,6 +41,18 @@ impl<
         self.header.kind == PageType::Root
     }
 
+    pub fn is_leaf(&self) -> bool {
+        self.header.kind == PageType::Leaf
+    }
+
+    pub fn len(&mut self) -> u16 {
+        self.page.len()
+    }
+
+    pub fn is_empty(&mut self) -> bool {
+        self.page.is_empty()
+    }
+
     pub fn split(mut self, b: u16) -> Result<BTreeNodeSplited<K, V>> {
         // split page cells at the middle
         let mut sibling_cells = self.page.split_off(b - 1)?;
@@ -77,6 +89,10 @@ impl<
 
     /// Read child index by cell index
     pub fn child(&mut self, index: u16) -> Result<Option<u32>> {
+        if self.is_leaf() {
+            return Ok(None);
+        }
+
         if index >= self.page.len() {
             Ok(self.header.right_child)
         } else {
@@ -144,6 +160,12 @@ impl<
         page.write_special(&new_page_header.to_bytes())?;
 
         page.try_into()
+    }
+
+    pub fn iter_children(&mut self) -> impl DoubleEndedIterator<Item = PageNumber> + '_ {
+        let len = if self.is_leaf() { 0 } else { self.len() + 1 };
+
+        (0..len).map(|i| self.child(i).unwrap().unwrap())
     }
 }
 

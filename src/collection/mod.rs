@@ -1,8 +1,8 @@
-mod storage;
 mod wal;
 
+use crate::btree::BTree;
 use crate::error::{self, Result};
-use crate::{config, OpenOptions};
+use crate::{config, dustdata_config, OpenOptions};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::ops::RangeBounds;
 use std::{
@@ -105,29 +105,30 @@ pub enum TransactionStatus {
     Aborted,
 }
 
-#[derive(Clone, Debug)]
-pub struct Collection<T: Sync + Send + Clone + Debug + Serialize + DeserializeOwned + 'static> {
+pub struct Collection<T: Sync + Send + Clone + Ord + Serialize + DeserializeOwned + 'static + Debug>
+{
+    btree: BTree<String, T>,
     memtable: Memtable<T>,
-    storage: Storage,
-    config: Arc<config::DustDataConfig>,
     pub wal: Wal,
 }
 
 type Memtable<T> = Arc<RwLock<HashMap<String, T>>>;
-type Storage = Arc<RwLock<storage::Storage>>;
 type Wal = Arc<RwLock<wal::Wal>>;
 
-impl<T: Sync + Send + Clone + Debug + Serialize + 'static + DeserializeOwned> Collection<T> {
-    pub fn new(config: Arc<config::DustDataConfig>) -> Self {
-        let storage = Arc::new(RwLock::new(storage::Storage::new(config.clone()).unwrap()));
-        let wal = Arc::new(RwLock::new(wal::Wal::new(config.clone()).unwrap()));
+impl<T: Sync + Send + Clone + Ord + Serialize + 'static + DeserializeOwned + Debug> Collection<T> {
+    pub fn new(name: &str) -> Result<Self> {
+        let dustdata_config = dustdata_config();
 
-        Self {
+        let base_path = dustdata_config.data_path.join(name);
+
+        let wal = Arc::new(RwLock::new(wal::Wal::new().unwrap()));
+        let btree = BTree::new(base_path.join("data.db"))?;
+
+        Ok(Self {
             memtable: Arc::new(RwLock::new(HashMap::new())),
+            btree,
             wal,
-            config,
-            storage,
-        }
+        })
     }
 
     /// Starts a new transaction

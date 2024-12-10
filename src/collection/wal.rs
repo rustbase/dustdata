@@ -1,16 +1,17 @@
 use crate::error::{self, Error, Result};
+use crate::serializer::{deserialize, serialize};
 use crate::OpenOptions;
 
 use super::{config, Operation, Transaction};
-use flate2::{read::GzDecoder, write::GzEncoder, Compression};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::ops::RangeBounds;
-use std::sync::Arc;
 use std::{fs, path};
+
+use config::dustdata_config;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct TransactionLog<T> {
@@ -51,69 +52,42 @@ impl<T: Sync + Send + Clone + Debug + Serialize + 'static + DeserializeOwned> Wa
 
 #[derive(Debug)]
 struct LogFile {
-    pub id: usize,
     pub file: fs::File,
 }
 
 impl LogFile {
-    pub fn new(log_path: &path::Path, max_log_size: u64) -> Self {
-        let id = LogFile::log_chunk(log_path, max_log_size);
-
+    pub fn new(log_path: &path::Path) -> Self {
         let file = fs::OpenOptions::new()
             .create(true)
             .append(true)
-            .open(log_path.join(format!("DustDataLog_{}", id)))
+            .open(log_path.join(format!("DustDataLog.xlog")))
             .unwrap();
 
-        Self { id, file }
-    }
-
-    fn log_chunk(log_path: &path::Path, max_log_size: u64) -> usize {
-        let mut id = 0;
-
-        loop {
-            let file_path = log_path.join(format!("DustDataLog_{}", id));
-
-            if !file_path.exists() {
-                break;
-            }
-
-            let metadata = fs::metadata(file_path).unwrap();
-
-            if metadata.len() < max_log_size {
-                break;
-            }
-
-            id += 1;
-        }
-
-        id
+        Self { file }
     }
 }
 
 #[derive(Debug)]
 pub struct Wal {
-    config: Arc<config::DustDataConfig>,
     current_file: LogFile,
     pub index: WALIndex,
 }
 
+const WAL_DATA_PATH: &str = "dustdata_xlog";
+
 impl Wal {
-    pub fn new(config: Arc<config::DustDataConfig>) -> Result<Self> {
-        let log_path = config.data_path.join(&config.wal.log_path);
+    pub fn new() -> Result<Self> {
+        let dustdata_config = dustdata_config();
+
+        let log_path = dustdata_config.data_path.join(WAL_DATA_PATH);
 
         fs::create_dir_all(&log_path).ok();
 
-        let current_file = LogFile::new(&log_path, config.wal.max_log_size);
+        let current_file = LogFile::new(&log_path);
 
-        let index = WALIndex::new(
-            &log_path,
-            config.wal.compression.is_some(),
-            config.wal.compression.as_ref().map(|c| c.level),
-        )?;
+        let index = WALIndex::new(&log_path)?;
 
         Ok(Self {
-            config,
             current_file,
             index,
         })
@@ -308,16 +282,10 @@ struct WALIndexEntry<T> {
 pub struct WALIndex {
     pub inner: BTreeMap<usize, (usize, usize)>, // tx_id -> (DustDataLog_*, offset)
     index_path: path::PathBuf,
-    use_compression: bool,
-    compression_lvl: Option<u32>,
 }
 
 impl WALIndex {
-    pub fn new(
-        path: &path::Path,
-        use_compression: bool,
-        compression_lvl: Option<u32>,
-    ) -> Result<Self> {
+    pub fn new(path: &path::Path) -> Result<Self> {
         let index_path = path.join(WAL_INDEX_FILENAME);
 
         let mut file = fs::OpenOptions::new()
@@ -330,16 +298,7 @@ impl WALIndex {
         let inner = if file.metadata().unwrap().len() == 0 {
             let index = BTreeMap::new();
 
-            let bytes = if use_compression {
-                let mut encoder =
-                    GzEncoder::new(Vec::new(), Compression::new(compression_lvl.unwrap()));
-                encoder
-                    .write_all(&bincode::serialize(&index).unwrap())
-                    .unwrap();
-                encoder.finish().unwrap()
-            } else {
-                bincode::serialize(&index).unwrap()
-            };
+            let bytes = serialize(&index).unwrap();
 
             file.write_all(&bytes).map_err(Error::IoError)?;
 
@@ -349,39 +308,16 @@ impl WALIndex {
 
             file.read_to_end(&mut bytes).map_err(Error::IoError)?;
 
-            let mut decoder = GzDecoder::new(&bytes[..]);
-
-            if decoder.header().is_some() {
-                let mut decoded_bytes = Vec::new();
-                decoder.read_to_end(&mut decoded_bytes).unwrap();
-
-                bincode::deserialize(&decoded_bytes).unwrap()
-            } else {
-                bincode::deserialize(&bytes).unwrap()
-            }
+            deserialize(&bytes).unwrap()
         };
 
-        Ok(Self {
-            inner,
-            index_path,
-            use_compression,
-            compression_lvl,
-        })
+        Ok(Self { inner, index_path })
     }
 
     pub fn write(&mut self, id: usize, log_chunk: usize, offset: usize) {
         self.inner.insert(id, (log_chunk, offset));
 
-        let bytes = bincode::serialize(&self.inner).unwrap();
-
-        let bytes = if self.use_compression {
-            let mut encoder =
-                GzEncoder::new(Vec::new(), Compression::new(self.compression_lvl.unwrap()));
-            encoder.write_all(&bytes).unwrap();
-            encoder.finish().unwrap()
-        } else {
-            bytes
-        };
+        let bytes = serialize(&self.inner).unwrap();
 
         fs::write(&self.index_path, bytes).unwrap();
     }

@@ -1,8 +1,13 @@
 use crate::{
     error::{Error, Result},
-    page::{io::BlockIO, spec::PageNumber, Page},
+    page::{
+        io::BlockIO,
+        spec::{LocationOffset, PageNumber},
+        Page,
+    },
     Either,
 };
+use glob::Pattern;
 use node::BTreeNode;
 use serde::{de::DeserializeOwned, Serialize};
 use std::{
@@ -15,8 +20,7 @@ use std::{
 pub mod node;
 pub mod spec;
 use spec::{
-    BTreeBlockHeader, BTreeCell, BTreePageHeader, PageType, BTREE_BLOCK_ALLOC_SIZE,
-    BTREE_PAGE_HEADER_SIZE,
+    BTreeBlockHeader, BTreeCell, BTreePageHeader, BTreePair, PageType, BTREE_PAGE_HEADER_SIZE,
 };
 
 pub const MAX_BRANCHING_FACTOR: u16 = 100;
@@ -48,28 +52,26 @@ impl<
     where
         P: AsRef<Path>,
     {
-        let io: BlockIO =
-            BlockIO::new(block_path, BTREE_BLOCK_ALLOC_SIZE as u16).map_err(Error::IoError)?;
+        let mut io: BlockIO = BlockIO::new(block_path).map_err(Error::IoError)?;
 
-        if io.exists().map_err(Error::IoError)? {
-            Self::open_block(io)
-        } else {
-            Self::create_block(io)
+        let mut metadata_page: Page<BTreeBlockHeader> =
+            io.read_metadata_page().map_err(Error::IoError)?;
+
+        match metadata_page.is_empty() {
+            false => {
+                let block_header = metadata_page.read(0)?.unwrap();
+
+                Ok(Self {
+                    io,
+                    root: block_header.root,
+                    b: MAX_BRANCHING_FACTOR,
+                    _k: PhantomData,
+                    _v: PhantomData,
+                })
+            }
+
+            true => Self::create_block(io),
         }
-    }
-
-    fn open_block(mut io: BlockIO) -> Result<Self> {
-        let bytes = io.read_alloc_data().map_err(Error::IoError)?;
-        let block_header: BTreeBlockHeader =
-            bincode::deserialize(&bytes).map_err(Error::SerializeError)?;
-
-        Ok(Self {
-            io,
-            root: block_header.root,
-            b: block_header.b,
-            _k: PhantomData,
-            _v: PhantomData,
-        })
     }
 
     fn create_block(mut io: BlockIO) -> Result<Self> {
@@ -77,19 +79,20 @@ impl<
         let metadata = BTreePageHeader::new(PageType::Leaf, None);
         root.write_special(&metadata.to_bytes()).unwrap();
 
-        io.write_page(0, &root).unwrap();
+        let root_page = io.write_new_page(&root).unwrap();
 
-        let block_header = BTreeBlockHeader {
-            b: MAX_BRANCHING_FACTOR,
-            root: 0,
-        };
+        let block_header = BTreeBlockHeader { root: root_page };
 
-        io.alloc_data(&bincode::serialize(&block_header).map_err(Error::SerializeError)?)
-            .map_err(Error::IoError)?;
+        let mut metadata_page: Page<BTreeBlockHeader> =
+            io.read_metadata_page().map_err(Error::IoError)?;
+
+        metadata_page.insert(0, block_header)?;
+
+        io.write_metadata_page(&metadata_page).unwrap();
 
         Ok(Self {
             io,
-            root: 0,
+            root: root_page,
             b: MAX_BRANCHING_FACTOR,
             _k: PhantomData,
             _v: PhantomData,
@@ -106,6 +109,22 @@ impl<
         page_number: PageNumber,
         parents: &mut Vec<PageNumber>,
     ) -> Result<Search> {
+        self.search_from_subtree_by(
+            |page| page.binary_search_by_key(key, |e| e.key.clone()),
+            page_number,
+            parents,
+        )
+    }
+
+    pub fn search_from_subtree_by<F>(
+        &mut self,
+        mut f: F,
+        page_number: PageNumber,
+        parents: &mut Vec<PageNumber>,
+    ) -> Result<Search>
+    where
+        F: FnMut(&mut Page<BTreeCell<K, V>>) -> Either<u16, u16>,
+    {
         let mut node: BTreeNode<K, V> = self
             .io
             .read_page(page_number.into())
@@ -115,7 +134,7 @@ impl<
         match node.header.kind {
             PageType::Internal | PageType::Root => {
                 parents.push(page_number);
-                let index = node.page.binary_search_by_key(key, |e| e.key.clone());
+                let index = f(&mut node.page);
 
                 if index.is_left() {
                     return Ok(Search {
@@ -128,11 +147,11 @@ impl<
 
                 let next_page = node.child(next_cell)?.unwrap();
 
-                self.search_from_subtree(key, next_page, parents)
+                self.search_from_subtree_by(f, next_page, parents)
             }
 
             PageType::Leaf => {
-                let index = node.page.binary_search_by_key(key, |e| e.key.clone());
+                let index = f(&mut node.page);
 
                 Ok(Search {
                     index,
@@ -287,6 +306,14 @@ impl<
         Ok(keys)
     }
 
+    pub fn len(&mut self) -> Result<usize> {
+        Ok(self.cells_from_subtree(self.root)?.len())
+    }
+
+    pub fn is_empty(&mut self) -> Result<bool> {
+        Ok(self.len()? == 0)
+    }
+
     pub fn cells_from_subtree(&mut self, page_number: PageNumber) -> Result<Vec<BTreeCell<K, V>>> {
         let mut node: BTreeNode<K, V> = self
             .io
@@ -437,15 +464,171 @@ impl<
     fn set_root(&mut self, page_number: PageNumber) -> Result<()> {
         self.root = page_number;
 
-        let block_header = BTreeBlockHeader {
-            b: MAX_BRANCHING_FACTOR,
-            root: self.root,
+        let block_header = BTreeBlockHeader { root: self.root };
+
+        let mut metadata_page: Page<BTreeBlockHeader> =
+            self.io.read_metadata_page().map_err(Error::IoError)?;
+
+        metadata_page.insert(0, block_header)?;
+
+        self.io.write_metadata_page(&metadata_page).unwrap();
+
+        Ok(())
+    }
+}
+
+impl<
+        K: Serialize + DeserializeOwned + PartialOrd + Ord + Clone + Debug,
+        V: Serialize + DeserializeOwned + PartialOrd + Ord + Clone + Debug,
+    > IntoIterator for BTree<K, V>
+{
+    type Item = BTreePair<K, V>;
+    type IntoIter = BTreeIterator<K, V>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        BTreeIterator::new(self)
+    }
+}
+
+pub struct BTreeIterator<K, V> {
+    btree: BTree<K, V>,
+    page: PageNumber,
+    cell_index: LocationOffset,
+    parents: Vec<PageNumber>,
+}
+
+impl<
+        K: Serialize + DeserializeOwned + PartialOrd + Ord + Clone + Debug,
+        V: Serialize + DeserializeOwned + PartialOrd + Ord + Clone + Debug,
+    > BTreeIterator<K, V>
+{
+    pub fn new(btree: BTree<K, V>) -> Self {
+        let mut iter = Self {
+            page: btree.root,
+            btree,
+            cell_index: 0,
+            parents: Vec::new(),
         };
 
-        self.io
-            .alloc_data(&bincode::serialize(&block_header).map_err(Error::SerializeError)?)
-            .map_err(Error::IoError)?;
+        iter.move_to_leftmost().unwrap();
+
+        iter
+    }
+
+    fn move_to_leftmost(&mut self) -> Result<()> {
+        let mut node: BTreeNode<K, V> = self
+            .btree
+            .io
+            .read_page(self.page.into())
+            .map_err(Error::IoError)?
+            .try_into()?;
+
+        while !node.is_leaf() {
+            self.parents.push(self.page);
+
+            self.page = node.child(0)?.unwrap();
+
+            let next_node: BTreeNode<K, V> = self
+                .btree
+                .io
+                .read_page(self.page.into())
+                .map_err(Error::IoError)?
+                .try_into()?;
+
+            node = next_node
+        }
+
+        self.cell_index = 0;
+
         Ok(())
+    }
+
+    pub fn into_btree(self) -> BTree<K, V> {
+        self.btree
+    }
+}
+
+impl<
+        K: Serialize + DeserializeOwned + PartialOrd + Ord + Clone + Debug,
+        V: Serialize + DeserializeOwned + PartialOrd + Ord + Clone + Debug,
+    > Iterator for BTreeIterator<K, V>
+{
+    type Item = BTreePair<K, V>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let mut node: BTreeNode<K, V> = self
+            .btree
+            .io
+            .read_page(self.page.into())
+            .unwrap()
+            .try_into()
+            .unwrap();
+
+        if node.is_empty() && node.is_leaf() {
+            return None;
+        }
+
+        let cell = node.page.read(self.cell_index).unwrap();
+
+        if node.is_leaf() && self.cell_index + 1 < node.len() {
+            self.cell_index += 1;
+            return Some(cell.unwrap().to_pair());
+        }
+
+        if !node.is_leaf() && self.cell_index < node.len() {
+            self.parents.push(self.page);
+            self.page = node.child(self.cell_index + 1).unwrap().unwrap();
+            self.move_to_leftmost().unwrap();
+
+            return Some(cell.unwrap().to_pair());
+        }
+
+        let mut found_branch = false;
+
+        while !self.parents.is_empty() && !found_branch {
+            let parent_page = self.parents.pop().unwrap();
+            let mut parent: BTreeNode<K, V> = self
+                .btree
+                .io
+                .read_page(parent_page.into())
+                .unwrap()
+                .try_into()
+                .unwrap();
+
+            let index = parent.iter_children().position(|c| c == self.page).unwrap() as u16;
+
+            self.page = parent_page;
+
+            if index < parent.len() {
+                self.cell_index = index;
+                found_branch = true;
+            }
+        }
+
+        if self.parents.is_empty() && !found_branch {
+            return None;
+        }
+
+        Some(cell.unwrap().to_pair())
+    }
+}
+
+impl<V: Serialize + DeserializeOwned + PartialOrd + Ord + Clone + Debug> BTree<String, V> {
+    /// O(n) worst-case complexity
+    pub fn find_pattern(&mut self, key_pattern: &str) -> Result<Vec<BTreePair<String, V>>> {
+        let results = self
+            .cells_from_subtree(self.root)?
+            .into_iter()
+            .filter_map(|c| {
+                if Pattern::new(key_pattern).unwrap().matches(&c.key) {
+                    Some(c.to_pair())
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<BTreePair<String, V>>>();
+
+        Ok(results)
     }
 }
 
@@ -455,16 +638,28 @@ mod btree_tests {
 
     #[test]
     fn create_btree() {
-        let mut btree = BTree::<u32, u32>::new("test_data/btree").unwrap();
+        let mut btree = BTree::<u32, u32>::new("test_data/btree.db").unwrap();
 
-        btree.insert(12, 12 * 2).unwrap();
-        btree.insert(6, 6 * 2).unwrap();
-        btree.insert(2, 2 * 2).unwrap();
-        btree.insert(16, 16 * 2).unwrap();
-
-        assert_eq!(btree.values().unwrap(), vec![4, 12, 24, 32]);
+        for i in 0u32..100 {
+            btree.insert(i, i * 2).unwrap();
+        }
 
         let value = btree.get(&2).unwrap().unwrap();
-        assert_eq!(value, 4)
+        assert_eq!(value, 4);
+
+        let value = btree.get(&10).unwrap().unwrap();
+        assert_eq!(value, 20);
+
+        let value = btree.get(&50).unwrap().unwrap();
+        assert_eq!(value, 100);
+
+        let value = btree.get(&75).unwrap().unwrap();
+        assert_eq!(value, 150);
+
+        let value = btree.get(&99).unwrap().unwrap();
+        assert_eq!(value, 198);
+
+        let length = btree.len().unwrap();
+        assert_eq!(length, 100);
     }
 }

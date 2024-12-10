@@ -6,7 +6,7 @@ use std::{
 
 use crate::{
     error::{CorruptedDataError, CorruptedDataKind, Error, Result},
-    ser_de::{deserialize, serialize},
+    serializer::{deserialize, serialize},
     Either,
 };
 use crc32fast::Hasher;
@@ -322,6 +322,38 @@ impl<T: Serialize + DeserializeOwned + PartialOrd + Ord + Clone> Page<T> {
         self.binary_search_by(|k| f(k).cmp(b))
     }
 
+    pub fn linear_search_by<F>(&mut self, mut f: F) -> Either<u16, u16>
+    where
+        F: FnMut(&T) -> Ordering,
+    {
+        let size = self.len();
+        let mut pointer = 0;
+
+        while pointer < size {
+            let data = self.read(pointer).unwrap().unwrap();
+
+            if f(&data).is_eq() {
+                return Either::Left(pointer);
+            }
+
+            pointer += 1;
+        }
+
+        Either::Right(pointer)
+    }
+
+    pub fn linear_search(&mut self, x: &T) -> Either<u16, u16> {
+        self.linear_search_by(|a| a.cmp(x))
+    }
+
+    pub fn linear_search_by_key<B, F>(&mut self, b: &B, mut f: F) -> Either<u16, u16>
+    where
+        F: FnMut(&T) -> B,
+        B: Ord,
+    {
+        self.linear_search_by(|k| f(k).cmp(b))
+    }
+
     pub fn delete(&mut self, index: LocationOffset) -> Result<()> {
         let offset = self.index_to_offset(index);
 
@@ -414,6 +446,8 @@ impl<T: Serialize + DeserializeOwned + PartialOrd + Ord + Clone> Page<T> {
             .seek(SeekFrom::Start(special as u64))
             .map_err(Error::IoError)?;
         self.io.write(data).map_err(Error::IoError)?;
+
+        self.write_header()?;
 
         Ok(())
     }

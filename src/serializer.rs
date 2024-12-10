@@ -1,18 +1,10 @@
 use crate::{
+    config::compression_config,
     error::{Error, Result},
-    CompressionConfig,
 };
 use flate2::{read::GzDecoder, write::GzEncoder, Compression};
 use serde::{de::DeserializeOwned, Serialize};
-use std::{
-    io::{Read, Write},
-    sync::OnceLock,
-};
-
-fn compression_config() -> &'static CompressionConfig {
-    static COMPRESSION_CONFIG: OnceLock<CompressionConfig> = OnceLock::new();
-    COMPRESSION_CONFIG.get_or_init(CompressionConfig::default)
-}
+use std::io::{Read, Write};
 
 pub fn serialize<T>(data: &T) -> Result<Vec<u8>>
 where

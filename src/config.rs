@@ -1,4 +1,18 @@
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    sync::OnceLock,
+};
+
+static COMPRESSION_CONFIG: OnceLock<CompressionConfig> = OnceLock::new();
+static DUSTDATA_CONFIG: OnceLock<DustDataConfig> = OnceLock::new();
+
+pub(super) fn compression_config() -> &'static CompressionConfig {
+    COMPRESSION_CONFIG.get_or_init(CompressionConfig::default)
+}
+
+pub(super) fn dustdata_config() -> &'static DustDataConfig {
+    DUSTDATA_CONFIG.get_or_init(DustDataConfig::default)
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OpenOptions {
@@ -10,23 +24,50 @@ pub enum OpenOptions {
 
 #[derive(Debug, Clone)]
 pub struct DustDataConfig {
-    pub wal: WALConfig,
     pub data_path: PathBuf,
-    pub storage: StorageConfig,
     pub open_options: OpenOptions,
 }
 
-#[derive(Debug, Clone)]
-pub struct WALConfig {
-    pub log_path: PathBuf,
-    /// The maximum size of the log file.
-    pub max_log_size: u64,
-    pub compression: Option<CompressionConfig>,
+impl Default for DustDataConfig {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl DustDataConfig {
+    pub fn new() -> Self {
+        Self {
+            data_path: PathBuf::from("./data"),
+            open_options: OpenOptions::ReadWrite,
+        }
+    }
+
+    /// The path to the data directory.
+    /// Default: ./data
+    pub fn data_path<P: AsRef<Path>>(&mut self, data_path: P) -> &mut Self {
+        self.data_path = data_path.as_ref().to_path_buf();
+        self
+    }
+
+    /// The open options for the database.
+    /// Default: OpenOptions::ReadWrite
+    /// This is the mode in which the database is opened.
+    pub fn open_options(&mut self, open_options: OpenOptions) -> &mut Self {
+        self.open_options = open_options;
+        self
+    }
+
+    pub fn build(self) {
+        DUSTDATA_CONFIG.set(self).unwrap();
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct CompressionConfig {
     /// The compression level.
+    ///
+    /// The integer here is typically on a scale of 0-9 where 0 means "no
+    /// compression" and 9 means "take as long as you'd like".
     pub level: u32,
     /// Enable compression
     pub enabled: bool,
@@ -47,6 +88,7 @@ impl CompressionConfig {
     }
 
     /// The compression level.
+    ///
     /// Default: 6
     pub fn level(&mut self, level: u32) -> &mut Self {
         self.level = level;
@@ -54,155 +96,14 @@ impl CompressionConfig {
     }
 
     /// Enable compression
+    ///
     /// Default: true
     pub fn enabled(&mut self, enabled: bool) -> &mut Self {
         self.enabled = enabled;
         self
     }
-}
 
-impl Default for DustDataConfig {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl DustDataConfig {
-    pub fn new() -> Self {
-        Self {
-            wal: WALConfig::new(),
-            data_path: PathBuf::from("./data"),
-            storage: StorageConfig::new(),
-            open_options: OpenOptions::ReadWrite,
-        }
-    }
-
-    /// The path to the data directory.
-    /// Default: ./data
-    pub fn data_path<P: AsRef<Path>>(&mut self, data_path: P) -> &mut Self {
-        self.data_path = data_path.as_ref().to_path_buf();
-        self
-    }
-
-    /// The write-ahead log configuration.
-    /// Default: WALConfig::new()
-    pub fn wal<F>(&mut self, f: F) -> &mut Self
-    where
-        F: FnOnce(&mut WALConfig) -> &mut WALConfig,
-    {
-        self.wal = f(&mut self.wal).clone();
-        self
-    }
-
-    /// The storage configuration.
-    /// Default: StorageConfig::new()
-    pub fn storage<F>(&mut self, f: F) -> &mut Self
-    where
-        F: FnOnce(&mut StorageConfig) -> &mut StorageConfig,
-    {
-        self.storage = f(&mut self.storage).clone();
-        self
-    }
-
-    /// The open options for the database.
-    /// Default: OpenOptions::ReadWrite
-    /// This is the mode in which the database is opened.
-    pub fn open_options(&mut self, open_options: OpenOptions) -> &mut Self {
-        self.open_options = open_options;
-        self
-    }
-
-    pub fn build(&self) -> Self {
-        self.clone()
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct StorageConfig {
-    /// The maximum size of a data chunk.
-    pub max_data_chunk_size: usize,
-    /// The maximum number of data chunks.
-    pub max_data_chunks: usize,
-    pub compression: Option<CompressionConfig>,
-}
-
-impl Default for StorageConfig {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl StorageConfig {
-    pub fn new() -> Self {
-        Self {
-            max_data_chunk_size: 10 * 1028 * 1028, // 10MB
-            max_data_chunks: 10,
-            compression: None,
-        }
-    }
-
-    /// The maximum size of a data chunk.
-    /// Default: 10MB
-    pub fn max_data_chunk_size(&mut self, max_data_chunk_size: usize) -> &mut Self {
-        self.max_data_chunk_size = max_data_chunk_size;
-        self
-    }
-
-    /// The maximum number of data chunks.
-    /// Default: 10
-    pub fn max_data_chunks(&mut self, max_data_chunks: usize) -> &mut Self {
-        self.max_data_chunks = max_data_chunks;
-        self
-    }
-
-    /// The compression configuration for the data chunks and indexes.
-    /// Default: None
-    pub fn compression<F>(&mut self, f: F) -> &mut Self
-    where
-        F: FnOnce(&mut CompressionConfig) -> &mut CompressionConfig,
-    {
-        self.compression = Some(f(&mut CompressionConfig::new()).clone());
-        self
-    }
-}
-
-impl Default for WALConfig {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl WALConfig {
-    pub fn new() -> Self {
-        Self {
-            log_path: PathBuf::from("./log"),
-            max_log_size: 5 * 1024 * 1024, // 5MB
-            compression: None,
-        }
-    }
-
-    /// The path to the log file relative to the data directory.
-    /// Default: <data_path>/log
-    pub fn log_path<P: AsRef<Path>>(&mut self, log_path: P) -> &mut Self {
-        self.log_path = log_path.as_ref().to_path_buf();
-        self
-    }
-
-    /// The maximum size of the log file.
-    /// Default: 5MB
-    /// This is the maximum size of the log file before it is rotated.
-    pub fn max_log_size(&mut self, max_log_size: u64) -> &mut Self {
-        self.max_log_size = max_log_size;
-        self
-    }
-
-    /// The compression configuration for the log file and index.
-    /// Default: None
-    pub fn compression<F>(&mut self, f: F) -> &mut Self
-    where
-        F: FnOnce(&mut CompressionConfig) -> &mut CompressionConfig,
-    {
-        self.compression = Some(f(&mut CompressionConfig::new()).clone());
-        self
+    pub fn build(self) {
+        COMPRESSION_CONFIG.set(self).unwrap();
     }
 }
