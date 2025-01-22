@@ -1,87 +1,36 @@
-// use dustdata::DustData;
+use std::thread;
 
-// pub fn test_config() -> dustdata::DustDataConfig {
-//     dustdata::DustDataConfig::default()
-//         .data_path("./test_data")
-//         .build()
-// }
+use dustdata::{collection::Transaction, DustData, DustDataConfig};
 
-// #[test]
-// pub fn collection_insert_operation() {
-//     let dustdata = DustData::new().unwrap();
-//     let collection = dustdata.collection::<String>("insert_collection");
+#[test]
+pub fn collection_insert_operation() {
+    DustDataConfig::new().data_path("test_data").build();
 
-//     collection
-//         .start_lazy(|t| {
-//             t.insert("key", "value".to_string());
-//         })
-//         .unwrap();
+    let dustdata = DustData::new().unwrap();
 
-//     let value = collection.get("key").unwrap().unwrap();
+    let collection = dustdata.collection::<i32>("test_collection").unwrap();
 
-//     assert_eq!(value, "value");
-// }
+    let mut threads = Vec::new();
 
-// #[test]
-// pub fn collection_update_operation() {
-//     let dustdata = DustData::new().unwrap();
-//     let collection = dustdata.collection::<String>("update_collection");
+    for i in 0..10 {
+        let collection = collection.clone();
+        let tx = thread::spawn(move || {
+            let mut xact = collection.branch_start().unwrap();
+            xact.insert(&i.to_string(), i).unwrap();
 
-//     collection
-//         .start_lazy(|t| {
-//             t.insert("key", "value".to_string());
-//         })
-//         .unwrap();
+            collection.commit(xact).unwrap();
+        });
 
-//     collection
-//         .start_lazy(|t| {
-//             t.update("key", "new_value".to_string());
-//         })
-//         .unwrap();
+        threads.push(tx);
+    }
 
-//     let value = collection.get("key").unwrap().unwrap();
+    for tx in threads {
+        tx.join().unwrap();
+    }
 
-//     assert_eq!(value, "new_value");
-// }
+    for i in 0..10 {
+        let value = collection.get(&i.to_string()).unwrap().unwrap();
 
-// #[test]
-// pub fn collection_delete_operation() {
-//     let dustdata = DustData::new().unwrap();
-//     let collection = dustdata.collection::<String>("delete_collection");
-
-//     collection
-//         .start_lazy(|t| {
-//             t.insert("key", "value".to_string());
-//         })
-//         .unwrap();
-
-//     collection
-//         .start_lazy(|t| {
-//             t.delete("key");
-//         })
-//         .unwrap();
-
-//     let value = collection.get("key").unwrap();
-
-//     assert!(value.is_none());
-// }
-
-// #[test]
-// pub fn collection_revert_operation() {
-//     let dustdata = DustData::new().unwrap();
-//     let collection = dustdata.collection::<String>("revert_operation_collection");
-
-//     let mut rolledback_transaction = collection
-//         .start_lazy(|t| {
-//             t.insert("key", "value".to_string());
-//         })
-//         .unwrap();
-
-//     collection
-//         .rollback_transaction(&mut rolledback_transaction)
-//         .unwrap();
-
-//     let value = collection.get("key").unwrap();
-
-//     assert!(value.is_none());
-// }
+        assert_eq!(value, i);
+    }
+}

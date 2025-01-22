@@ -3,9 +3,11 @@ use crate::{
     page::{spec::PageNumber, Page},
 };
 use serde::{de::DeserializeOwned, Serialize};
-use std::fmt::Debug;
 
-use super::spec::{BTreeCell, BTreePageHeader, PageType, BTREE_PAGE_HEADER_SIZE};
+use super::{
+    spec::{BTreeCell, BTreePageHeader, PageType, BTREE_PAGE_HEADER_SIZE},
+    KeyTrait, ValueTrait,
+};
 
 pub struct BTreeNode<K, V> {
     pub page: Page<BTreeCell<K, V>>,
@@ -18,11 +20,7 @@ pub struct BTreeNodeSplited<K, V> {
     pub sibling_node: BTreeNode<K, V>,
 }
 
-impl<
-        K: Serialize + DeserializeOwned + PartialOrd + Ord + Clone + Debug,
-        V: Serialize + DeserializeOwned + PartialOrd + Ord + Clone + Debug,
-    > BTreeNode<K, V>
-{
+impl<K: KeyTrait, V: ValueTrait> BTreeNode<K, V> {
     pub fn is_full(&self, b: u16) -> bool {
         match self.header.kind {
             PageType::Internal | PageType::Root => self.page.len() == (b * 2 - 1),

@@ -47,13 +47,13 @@
 //! ```
 
 pub mod btree;
-// pub mod collection;
+pub mod collection;
 pub mod config;
 pub mod error;
 pub mod page;
 mod serializer;
 
-// pub use collection::Collection;
+pub use collection::Collection;
 pub use config::*;
 
 pub use bincode;
@@ -62,7 +62,7 @@ use serde::{de::DeserializeOwned, Serialize};
 use std::fmt::Debug;
 use std::fs;
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
 pub enum Either<L, R> {
     Left(L),
     Right(R),
@@ -92,31 +92,31 @@ impl<L, R> Either<L, R> {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Copy)]
 pub struct DustData;
 
 impl DustData {
-    // pub fn new() -> Result<Self> {
-    //     let dustdata_config = dustdata_config();
+    pub fn new() -> Result<Self> {
+        let dustdata_config = dustdata_config();
 
-    //     fs::create_dir_all(&dustdata_config.data_path).ok();
+        fs::create_dir_all(&dustdata_config.data_path).ok();
 
-    //     Ok(Self)
-    // }
+        Ok(Self)
+    }
 
-    // pub fn collection<T>(&self, name: &str) -> Result<collection::Collection<T>>
-    // where
-    //     T: Sync + Send + Clone + Debug + Serialize + DeserializeOwned + 'static + Ord,
-    // {
-    //     collection::Collection::new(name)
-    // }
+    pub fn collection<T>(&self, name: &str) -> Result<collection::Collection<T>>
+    where
+        T: Sync + Send + Clone + Debug + Serialize + DeserializeOwned + 'static + Ord,
+    {
+        collection::Collection::new(name)
+    }
 
-    // pub fn drop_collection(&self, name: &str) -> Result<()> {
-    //     let dustdata_config = dustdata_config();
+    pub fn drop_collection(&self, name: &str) -> Result<()> {
+        let dustdata_config = dustdata_config();
 
-    //     fs::remove_dir_all(dustdata_config.data_path.join(name))
-    //         .map_err(|_| error::Error::NotFound("collection".to_owned()))?;
+        fs::remove_dir_all(dustdata_config.data_path.join(name))
+            .map_err(|_| error::Error::NotFound("collection".to_owned()))?;
 
-    //     Ok(())
-    // }
+        Ok(())
+    }
 }

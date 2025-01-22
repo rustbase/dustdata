@@ -44,7 +44,7 @@ impl DustDataConfig {
 
     /// The path to the data directory.
     /// Default: ./data
-    pub fn data_path<P: AsRef<Path>>(&mut self, data_path: P) -> &mut Self {
+    pub fn data_path<P: AsRef<Path>>(mut self, data_path: P) -> Self {
         self.data_path = data_path.as_ref().to_path_buf();
         self
     }
@@ -52,7 +52,7 @@ impl DustDataConfig {
     /// The open options for the database.
     /// Default: OpenOptions::ReadWrite
     /// This is the mode in which the database is opened.
-    pub fn open_options(&mut self, open_options: OpenOptions) -> &mut Self {
+    pub fn open_options(mut self, open_options: OpenOptions) -> Self {
         self.open_options = open_options;
         self
     }

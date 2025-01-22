@@ -18,6 +18,33 @@ pub mod io;
 pub mod layout;
 pub mod spec;
 
+/// Slotted page layout
+/// ```text
+///             CELL_POINTER_SIZE
+///                    |                           +-> header.lower
+/// PAGE_HEADER_SIZE   |                           |
+/// |--------|------------------|                  V                    
+/// +--------+-------------------+-----------------+-----------------+ -+
+/// | header |  cell pointer 01  | cell pointer 02 | --->            |  |
+/// +--------+-------------------+-----------------+                 |  |
+/// |                        (Free space)                            |  +- PAGE_SIZE (4096 bytes)
+/// |          +-----------------+-----------------+-----------------+  |
+/// |     <--- | cell data 02    | cell data 01    |  special space  |  |
+/// +----------+-----------------+-----------------+-----------------+ -+
+///            ^
+///            |
+///            +-> header.upper
+/// ```
+/// Header: contains metadata about the page, such as the type of the page, the lower and upper pointers.
+///
+/// Additional header: additional metadata about the page.
+///
+/// Cell pointer: contains the position of the cell in the page, the length of the cell, and the metadata of the cell.
+/// Cell data: the actual data of the cell.
+///
+/// The lower pointer points to the end of the cell pointers.
+/// The upper pointer points to the end of the cell data.
+///
 pub struct Page<T> {
     pub header: PageHeader,
     io: Cursor<[u8; PAGE_SIZE as usize]>,
@@ -236,7 +263,9 @@ impl<T: Serialize + DeserializeOwned + PartialOrd + Ord + Clone> Page<T> {
     }
 
     pub fn read_at(&mut self, offset: usize) -> Result<Option<T>> {
-        assert!(offset < self.header.lower as usize, "Index out of bounds");
+        if offset >= self.header.lower as usize {
+            return Ok(None);
+        }
 
         // preallocate a buffer to read the page
         let mut buffer = [0; PAGE_SIZE as usize];
@@ -486,6 +515,10 @@ impl<T: Serialize + DeserializeOwned + PartialOrd + Ord + Clone> Page<T> {
         Ok(buffer)
     }
 
+    pub fn iter(&mut self) -> PageIterator<'_, T> {
+        PageIterator::new(self)
+    }
+
     fn header_size(&self) -> usize {
         PAGE_HEADER_SIZE
     }
@@ -519,6 +552,42 @@ impl<T: Serialize + DeserializeOwned + PartialOrd + Ord + Clone> Page<T> {
         let mut hasher = Hasher::new();
         hasher.update(&self.io.get_ref()[PAGE_HEADER_SIZE..]);
         hasher.finalize()
+    }
+}
+
+pub struct PageIterator<'p, T> {
+    pos: LocationOffset,
+    page: &'p mut Page<T>,
+}
+
+impl<'p, T> PageIterator<'p, T> {
+    pub fn new(page: &'p mut Page<T>) -> Self {
+        Self { page, pos: 0 }
+    }
+}
+
+impl<'p, T: Serialize + DeserializeOwned + PartialOrd + Ord + Clone> Iterator
+    for PageIterator<'p, T>
+{
+    type Item = T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.pos >= self.page.len() {
+            return None;
+        }
+
+        let cell = self.page.read(self.pos).unwrap();
+
+        self.pos += 1;
+
+        cell
+    }
+
+    fn last(self) -> Option<Self::Item>
+    where
+        Self: Sized,
+    {
+        self.page.read(self.page.len() - 1).unwrap()
     }
 }
 

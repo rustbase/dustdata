@@ -1,11 +1,10 @@
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{
     fs::{self, File, OpenOptions},
     io::{self, Read, Seek, Write},
     mem,
     path::Path,
 };
-
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use super::{
     spec::{PageNumber, PAGE_SIZE},
@@ -34,6 +33,10 @@ impl BlockIO {
 
         let file = open_file(path.as_ref())?;
 
+        Self::from_file(file)
+    }
+
+    fn from_file(file: File) -> io::Result<Self> {
         let mut block = Self { file };
 
         if block.file.metadata()?.len() == 0 {
@@ -45,7 +48,7 @@ impl BlockIO {
         Ok(block)
     }
 
-    pub fn copy_to<P>(&mut self, path: P) -> io::Result<BlockIO>
+    pub fn copy_to<P>(&mut self, path: P) -> io::Result<Self>
     where
         P: AsRef<Path>,
     {
@@ -53,11 +56,21 @@ impl BlockIO {
             fs::create_dir_all(parent)?;
         }
 
-        let mut file = open_file(path.as_ref())?;
+        let mut new_file = open_file(path.as_ref())?;
 
-        io::copy(&mut self.file, &mut file)?;
+        let mut buffer = [0u8; 8192];
 
-        Self::new(path.as_ref())
+        self.file.seek(io::SeekFrom::Start(0))?;
+
+        while let Ok(n) = self.file.read(&mut buffer) {
+            if n == 0 {
+                break;
+            }
+
+            new_file.write_all(&buffer[..n])?;
+        }
+
+        Self::from_file(new_file)
     }
 
     pub fn write_new_page<T>(&mut self, page: &Page<T>) -> io::Result<u32>
@@ -151,10 +164,12 @@ impl BlockIO {
 }
 
 pub fn open_file(path: &Path) -> io::Result<File> {
-    OpenOptions::new()
+    let file = OpenOptions::new()
         .create(true)
         .read(true)
         .write(true)
         .truncate(false)
-        .open(path)
+        .open(path)?;
+
+    Ok(file)
 }

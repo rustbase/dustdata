@@ -14,7 +14,7 @@ use std::{
     cmp::{self, Ordering},
     fmt::Debug,
     marker::PhantomData,
-    path::Path,
+    ops::{Bound, RangeBounds},
 };
 
 pub mod node;
@@ -25,6 +25,12 @@ use spec::{
 
 pub const MAX_BRANCHING_FACTOR: u16 = 100;
 
+pub trait KeyTrait: Serialize + DeserializeOwned + PartialOrd + Ord + Clone + Debug {}
+impl<T: Serialize + DeserializeOwned + PartialOrd + Ord + Clone + Debug> KeyTrait for T {}
+
+pub trait ValueTrait: Serialize + DeserializeOwned + PartialOrd + Clone + Ord + Debug {}
+impl<T: Serialize + DeserializeOwned + PartialOrd + Clone + Ord + Debug> ValueTrait for T {}
+
 #[derive(Debug)]
 pub struct Search {
     /// The page number where the search ended
@@ -34,26 +40,45 @@ pub struct Search {
     pub index: Either<u16, u16>,
 }
 
+impl Search {
+    pub fn next_cell<K, V>(&self, btree: &BTree<K, V>) -> Result<Self>
+    where
+        K: KeyTrait,
+        V: ValueTrait,
+    {
+        let mut page = self.page;
+        let cell;
+
+        match self.index {
+            Either::Left(index) => cell = Either::Left(index + 1),
+            Either::Right(_) => {
+                page = self.page + 1;
+                cell = Either::Left(0);
+            }
+        };
+
+        if btree.io.page_exists(page).map_err(Error::IoError)? {
+            Ok(Self { index: cell, page })
+        } else {
+            Ok(Self {
+                index: cell,
+                page: self.page,
+            })
+        }
+    }
+}
+
 pub struct BTree<K, V> {
     root: PageNumber,
     b: u16,
-    io: BlockIO,
+    pub io: BlockIO,
 
     _k: PhantomData<K>,
     _v: PhantomData<V>,
 }
 
-impl<
-        K: Serialize + DeserializeOwned + PartialOrd + Ord + Clone + Debug,
-        V: Serialize + DeserializeOwned + PartialOrd + Ord + Clone + Debug,
-    > BTree<K, V>
-{
-    pub fn new<P>(block_path: P) -> Result<Self>
-    where
-        P: AsRef<Path>,
-    {
-        let mut io: BlockIO = BlockIO::new(block_path).map_err(Error::IoError)?;
-
+impl<K: KeyTrait, V: ValueTrait> BTree<K, V> {
+    pub fn new(mut io: BlockIO) -> Result<Self> {
         let mut metadata_page: Page<BTreeBlockHeader> =
             io.read_metadata_page().map_err(Error::IoError)?;
 
@@ -293,28 +318,24 @@ impl<
     }
 
     pub fn values(&mut self) -> Result<Vec<V>> {
-        let values = self.cells_from_subtree(self.root)?.into_iter();
+        let values = self.pairs_from_subtree(self.root)?.into_iter();
         let values = values.map(|e| e.value.unwrap()).collect::<Vec<V>>();
 
         Ok(values)
     }
 
     pub fn keys(&mut self) -> Result<Vec<K>> {
-        let keys = self.cells_from_subtree(self.root)?.into_iter();
+        let keys = self.pairs_from_subtree(self.root)?.into_iter();
         let keys = keys.map(|e| e.key).collect::<Vec<K>>();
 
         Ok(keys)
     }
 
-    pub fn len(&mut self) -> Result<usize> {
-        Ok(self.cells_from_subtree(self.root)?.len())
+    pub fn pairs(&mut self) -> Result<Vec<BTreePair<K, V>>> {
+        self.pairs_from_subtree(self.root)
     }
 
-    pub fn is_empty(&mut self) -> Result<bool> {
-        Ok(self.len()? == 0)
-    }
-
-    pub fn cells_from_subtree(&mut self, page_number: PageNumber) -> Result<Vec<BTreeCell<K, V>>> {
+    fn pairs_from_subtree(&mut self, page_number: PageNumber) -> Result<Vec<BTreePair<K, V>>> {
         let mut node: BTreeNode<K, V> = self
             .io
             .read_page(page_number.into())
@@ -327,15 +348,15 @@ impl<
             let child = node.child(index)?;
 
             if let Some(child) = child {
-                results.extend(self.cells_from_subtree(child)?)
+                results.extend(self.pairs_from_subtree(child)?)
             }
 
-            results.extend(node.page.read(index)?);
+            results.extend(node.page.read(index)?.map(|m| m.to_pair()));
         }
 
         let right = node.child(node.page.len())?;
         if let Some(right) = right {
-            results.extend(self.cells_from_subtree(right)?)
+            results.extend(self.pairs_from_subtree(right)?)
         }
 
         Ok(results)
@@ -475,42 +496,114 @@ impl<
 
         Ok(())
     }
-}
 
-impl<
-        K: Serialize + DeserializeOwned + PartialOrd + Ord + Clone + Debug,
-        V: Serialize + DeserializeOwned + PartialOrd + Ord + Clone + Debug,
-    > IntoIterator for BTree<K, V>
-{
-    type Item = BTreePair<K, V>;
-    type IntoIter = BTreeIterator<K, V>;
+    pub fn iter(&mut self) -> BTreeIterator<'_, K, V> {
+        BTreeIterator::new(self, None, None)
+    }
 
-    fn into_iter(self) -> Self::IntoIter {
-        BTreeIterator::new(self)
+    pub fn len(&mut self) -> Result<usize> {
+        Ok(self.pairs_from_subtree(self.root)?.len())
+    }
+
+    pub fn is_empty(&mut self) -> Result<bool> {
+        Ok(self.len()? == 0)
+    }
+
+    pub fn contains(&mut self, key: &K) -> Result<bool> {
+        Ok(self.get(key)?.is_some())
+    }
+
+    pub fn sync(&self) -> Result<()> {
+        self.io.sync().map_err(Error::IoError)
+    }
+
+    pub fn range<R>(&mut self, range: R) -> Result<BTreeIterator<'_, K, V>>
+    where
+        R: RangeBounds<K>,
+    {
+        let start_index = match range.start_bound() {
+            Bound::Unbounded => None,
+            Bound::Included(key) => Some(self.search(key)?),
+
+            _ => unimplemented!(),
+        };
+
+        let end_index = match range.end_bound() {
+            Bound::Unbounded => None,
+            Bound::Excluded(key) => Some(self.search(key)?),
+            Bound::Included(key) => {
+                let search = self.search(key)?.next_cell(self)?;
+
+                Some(search)
+            }
+        };
+
+        let start_pos = start_index.map(|s| {
+            let index = match s.index {
+                Either::Left(index) => index,
+                Either::Right(index) => index,
+            };
+
+            BTreeIteratorPosition {
+                index,
+                page: s.page,
+            }
+        });
+
+        let end_pos = end_index.map(|s| {
+            let index = match s.index {
+                Either::Left(index) => index,
+                Either::Right(index) => index,
+            };
+
+            BTreeIteratorPosition {
+                index,
+                page: s.page,
+            }
+        });
+
+        Ok(BTreeIterator::new(self, start_pos, end_pos))
     }
 }
 
-pub struct BTreeIterator<K, V> {
-    btree: BTree<K, V>,
+#[derive(Debug)]
+pub struct BTreeIteratorPosition {
     page: PageNumber,
-    cell_index: LocationOffset,
-    parents: Vec<PageNumber>,
+    index: LocationOffset,
 }
 
-impl<
-        K: Serialize + DeserializeOwned + PartialOrd + Ord + Clone + Debug,
-        V: Serialize + DeserializeOwned + PartialOrd + Ord + Clone + Debug,
-    > BTreeIterator<K, V>
-{
-    pub fn new(btree: BTree<K, V>) -> Self {
-        let mut iter = Self {
+pub struct BTreeIterator<'b, K, V> {
+    btree: &'b mut BTree<K, V>,
+    parents: Vec<PageNumber>,
+    pos: BTreeIteratorPosition,
+    end_at: Option<BTreeIteratorPosition>,
+    done: bool,
+}
+
+impl<'b, K: KeyTrait, V: ValueTrait> BTreeIterator<'b, K, V> {
+    pub fn new(
+        btree: &'b mut BTree<K, V>,
+        start_at: Option<BTreeIteratorPosition>,
+        end_at: Option<BTreeIteratorPosition>,
+    ) -> Self {
+        let default_pos = BTreeIteratorPosition {
+            index: 0,
             page: btree.root,
+        };
+
+        let mut iter = Self {
             btree,
-            cell_index: 0,
+            pos: default_pos,
             parents: Vec::new(),
+            end_at,
+            done: false,
         };
 
         iter.move_to_leftmost().unwrap();
+
+        if let Some(pos) = start_at {
+            iter.pos = pos;
+        }
 
         iter
     }
@@ -519,65 +612,98 @@ impl<
         let mut node: BTreeNode<K, V> = self
             .btree
             .io
-            .read_page(self.page.into())
+            .read_page(self.pos.page.into())
             .map_err(Error::IoError)?
             .try_into()?;
 
         while !node.is_leaf() {
-            self.parents.push(self.page);
+            self.parents.push(self.pos.page);
 
-            self.page = node.child(0)?.unwrap();
+            self.pos.page = node.child(0)?.unwrap();
 
             let next_node: BTreeNode<K, V> = self
                 .btree
                 .io
-                .read_page(self.page.into())
+                .read_page(self.pos.page.into())
                 .map_err(Error::IoError)?
                 .try_into()?;
 
             node = next_node
         }
 
-        self.cell_index = 0;
+        self.pos.index = 0;
 
         Ok(())
     }
 
-    pub fn into_btree(self) -> BTree<K, V> {
-        self.btree
-    }
-}
-
-impl<
-        K: Serialize + DeserializeOwned + PartialOrd + Ord + Clone + Debug,
-        V: Serialize + DeserializeOwned + PartialOrd + Ord + Clone + Debug,
-    > Iterator for BTreeIterator<K, V>
-{
-    type Item = BTreePair<K, V>;
-
-    fn next(&mut self) -> Option<Self::Item> {
+    fn move_to_rightmost(&mut self) -> Result<()> {
         let mut node: BTreeNode<K, V> = self
             .btree
             .io
-            .read_page(self.page.into())
+            .read_page(self.pos.page.into())
+            .map_err(Error::IoError)?
+            .try_into()?;
+
+        while !node.is_leaf() {
+            self.parents.push(self.pos.page);
+
+            let len = node.len();
+            self.pos.page = node.child(len)?.unwrap();
+
+            let next_node: BTreeNode<K, V> = self
+                .btree
+                .io
+                .read_page(self.pos.page.into())
+                .map_err(Error::IoError)?
+                .try_into()?;
+
+            node = next_node
+        }
+
+        self.pos.index = node.len() - 1;
+
+        Ok(())
+    }
+}
+
+impl<K: KeyTrait, V: ValueTrait> Iterator for BTreeIterator<'_, K, V> {
+    type Item = BTreePair<K, V>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.done {
+            return None;
+        }
+
+        let mut node: BTreeNode<K, V> = self
+            .btree
+            .io
+            .read_page(self.pos.page.into())
             .unwrap()
             .try_into()
             .unwrap();
 
         if node.is_empty() && node.is_leaf() {
+            self.done = true;
             return None;
         }
 
-        let cell = node.page.read(self.cell_index).unwrap();
+        if let Some(end_at) = &self.end_at {
+            if end_at.index == self.pos.index && end_at.page == self.pos.page {
+                self.done = true;
+                return None;
+            }
+        }
 
-        if node.is_leaf() && self.cell_index + 1 < node.len() {
-            self.cell_index += 1;
+        let cell = node.page.read(self.pos.index).unwrap();
+
+        if node.is_leaf() && self.pos.index + 1 < node.len() {
+            self.pos.index += 1;
             return Some(cell.unwrap().to_pair());
         }
 
-        if !node.is_leaf() && self.cell_index < node.len() {
-            self.parents.push(self.page);
-            self.page = node.child(self.cell_index + 1).unwrap().unwrap();
+        if !node.is_leaf() && self.pos.index < node.len() {
+            self.parents.push(self.pos.page);
+            self.pos.page = node.child(self.pos.index + 1).unwrap().unwrap();
             self.move_to_leftmost().unwrap();
 
             return Some(cell.unwrap().to_pair());
@@ -595,40 +721,63 @@ impl<
                 .try_into()
                 .unwrap();
 
-            let index = parent.iter_children().position(|c| c == self.page).unwrap() as u16;
+            let index = parent
+                .iter_children()
+                .position(|c| c == self.pos.page)
+                .unwrap() as u16;
 
-            self.page = parent_page;
+            self.pos.page = parent_page;
 
             if index < parent.len() {
-                self.cell_index = index;
+                self.pos.index = index;
                 found_branch = true;
             }
         }
 
         if self.parents.is_empty() && !found_branch {
-            return None;
+            self.done = true;
         }
+
+        Some(cell.unwrap().to_pair())
+    }
+
+    fn last(mut self) -> Option<Self::Item>
+    where
+        Self: Sized,
+    {
+        self.move_to_rightmost().unwrap();
+
+        let mut node: BTreeNode<K, V> = self
+            .btree
+            .io
+            .read_page(self.pos.page.into())
+            .unwrap()
+            .try_into()
+            .unwrap();
+
+        let cell = node.page.read(self.pos.index).unwrap();
+
+        self.done = true;
 
         Some(cell.unwrap().to_pair())
     }
 }
 
-impl<V: Serialize + DeserializeOwned + PartialOrd + Ord + Clone + Debug> BTree<String, V> {
+impl<V: ValueTrait> BTree<String, V> {
     /// O(n) worst-case complexity
-    pub fn find_pattern(&mut self, key_pattern: &str) -> Result<Vec<BTreePair<String, V>>> {
-        let results = self
-            .cells_from_subtree(self.root)?
-            .into_iter()
-            .filter_map(|c| {
-                if Pattern::new(key_pattern).unwrap().matches(&c.key) {
-                    Some(c.to_pair())
-                } else {
-                    None
-                }
-            })
-            .collect::<Vec<BTreePair<String, V>>>();
+    pub fn find_pattern<'a>(
+        &'a mut self,
+        key_pattern: &'a str,
+    ) -> impl Iterator<Item = BTreePair<String, V>> + 'a {
+        let iter = self.iter();
 
-        Ok(results)
+        iter.filter_map(|c| {
+            if Pattern::new(key_pattern).unwrap().matches(&c.key) {
+                Some(c)
+            } else {
+                None
+            }
+        })
     }
 }
 
@@ -638,9 +787,10 @@ mod btree_tests {
 
     #[test]
     fn create_btree() {
-        let mut btree = BTree::<u32, u32>::new("test_data/btree.db").unwrap();
+        let io = BlockIO::new("test_data/btree.db").unwrap();
+        let mut btree = BTree::<u32, u32>::new(io).unwrap();
 
-        for i in 0u32..100 {
+        for i in 0u32..=100 {
             btree.insert(i, i * 2).unwrap();
         }
 
@@ -660,6 +810,10 @@ mod btree_tests {
         assert_eq!(value, 198);
 
         let length = btree.len().unwrap();
-        assert_eq!(length, 100);
+        assert_eq!(length, 101);
+
+        for (index, pair) in btree.range(..).unwrap().enumerate() {
+            assert_eq!(pair.value.unwrap(), index as u32 * 2);
+        }
     }
 }
