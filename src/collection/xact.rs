@@ -42,18 +42,57 @@ impl<T: ValueTrait> TransactionOperations<T> {
 }
 
 pub trait Transaction<T: ValueTrait> {
-    fn get(&mut self, key: &str) -> Result<Option<T>>;
-    fn insert(&mut self, key: &str, value: T) -> Result<()>;
-    fn delete(&mut self, key: &str) -> Result<()>;
-    fn update(&mut self, key: &str, new_value: T) -> Result<()>;
-    fn iter(&mut self) -> BTreeIterator<'_, String, T>;
+    fn get(&mut self, key: &str) -> Result<Option<T>> {
+        self.btree().get(&key.to_string())
+    }
+
+    fn insert(&mut self, key: &str, value: T) -> Result<()> {
+        self.log().write(XLogOperation::Insert {
+            key: key.to_string(),
+            value: value.clone(),
+        })?;
+
+        self.btree().insert(key.to_string(), value)
+    }
+
+    fn delete(&mut self, key: &str) -> Result<()> {
+        self.log().write(XLogOperation::Delete {
+            key: key.to_string(),
+        })?;
+
+        self.btree().delete(&key.to_string())
+    }
+
+    fn update(&mut self, key: &str, new_value: T) -> Result<()> {
+        self.log().write(XLogOperation::Update {
+            key: key.to_string(),
+            new_value: new_value.clone(),
+        })?;
+
+        self.btree().delete(&key.to_string())?;
+        self.btree().insert(key.to_string(), new_value)?;
+
+        Ok(())
+    }
+
+    fn iter(&mut self) -> BTreeIterator<'_, String, T> {
+        self.btree().iter()
+    }
+
     fn find_by_pattern<'a>(
         &'a mut self,
         pattern: &'a str,
-    ) -> Box<dyn Iterator<Item = BTreePair<String, T>> + 'a>;
+    ) -> Box<(dyn Iterator<Item = BTreePair<String, T>> + 'a)>
+    where
+        T: 'a,
+    {
+        Box::new(self.btree().find_pattern(pattern))
+    }
+
     fn rollback(self);
     fn xid(&self) -> u64;
     fn log(&mut self) -> &mut TransactionOperations<T>;
+    fn btree(&mut self) -> &mut BTree<String, T>;
 }
 
 pub struct TransactionBuilder;

@@ -1,13 +1,10 @@
 use std::fs;
 
 use crate::{
-    btree::{spec::BTreePair, BTree, BTreeIterator, ValueTrait},
-    collection::{
-        xact::{Transaction, TransactionOperations},
-        xlog::XLogOperation,
-    },
+    btree::{BTree, ValueTrait},
+    collection::xact::{Transaction, TransactionOperations},
     dustdata_config,
-    error::{Error, Result},
+    error::Error,
 };
 
 pub struct BranchTransaction<T: ValueTrait> {
@@ -18,50 +15,6 @@ pub struct BranchTransaction<T: ValueTrait> {
 }
 
 impl<T: ValueTrait> Transaction<T> for BranchTransaction<T> {
-    fn get(&mut self, key: &str) -> Result<Option<T>> {
-        self.btree.get(&key.to_string())
-    }
-
-    fn insert(&mut self, key: &str, value: T) -> Result<()> {
-        self.xact_op.write(XLogOperation::Insert {
-            key: key.to_string(),
-            value: value.clone(),
-        })?;
-
-        self.btree.insert(key.to_string(), value)
-    }
-
-    fn delete(&mut self, key: &str) -> Result<()> {
-        self.xact_op.write(XLogOperation::Delete {
-            key: key.to_string(),
-        })?;
-
-        self.btree.delete(&key.to_string())
-    }
-
-    fn update(&mut self, key: &str, new_value: T) -> Result<()> {
-        self.xact_op.write(XLogOperation::Update {
-            key: key.to_string(),
-            new_value: new_value.clone(),
-        })?;
-
-        self.btree.delete(&key.to_string())?;
-        self.btree.insert(key.to_string(), new_value)?;
-
-        Ok(())
-    }
-
-    fn iter(&mut self) -> BTreeIterator<'_, String, T> {
-        self.btree.iter()
-    }
-
-    fn find_by_pattern<'a>(
-        &'a mut self,
-        pattern: &'a str,
-    ) -> Box<(dyn Iterator<Item = BTreePair<String, T>> + 'a)> {
-        Box::new(self.btree.find_pattern(pattern))
-    }
-
     fn rollback(self) {}
 
     fn xid(&self) -> u64 {
@@ -70,6 +23,10 @@ impl<T: ValueTrait> Transaction<T> for BranchTransaction<T> {
 
     fn log(&mut self) -> &mut TransactionOperations<T> {
         &mut self.xact_op
+    }
+
+    fn btree(&mut self) -> &mut BTree<String, T> {
+        &mut self.btree
     }
 }
 

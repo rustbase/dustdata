@@ -24,7 +24,7 @@ pub enum TransactionStatus {
 
 pub const COLLECTION_LOCK_FILE: &str = ".lock";
 
-#[derive(Clone)]
+/// Collection is a key-value store
 pub struct Collection<T: ValueTrait> {
     btree: Arc<Mutex<BTree<String, T>>>,
     xlog: Arc<Mutex<XLog<T>>>,
@@ -54,7 +54,7 @@ impl<T: ValueTrait> Collection<T> {
         })
     }
 
-    /// Starts a new transaction
+    /// Starts a new branch transaction.
     pub fn branch_start(&self) -> Result<impl Transaction<T> + '_> {
         let dustdata_config = dustdata_config();
         let base_path = dustdata_config.data_path.join(self.name.clone());

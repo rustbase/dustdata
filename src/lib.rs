@@ -105,6 +105,17 @@ impl DustData {
         Ok(Self)
     }
 
+    /// Creates a new collection.
+    /// ## Arguments
+    /// * `name` - The name of the collection.
+    /// ## Example
+    /// ```rust
+    /// use dustdata::DustData;
+    ///
+    /// let dustdata = DustData::new().unwrap();
+    ///
+    /// let collection = dustdata.create_collection::<User>("users").unwrap();
+    /// ```
     pub fn collection<T>(&self, name: &str) -> Result<Arc<collection::Collection<T>>>
     where
         T: Sync + Send + Clone + Debug + Serialize + DeserializeOwned + 'static + Ord,
@@ -112,6 +123,17 @@ impl DustData {
         Ok(Arc::new(collection::Collection::new(name)?))
     }
 
+    /// Drops a collection.
+    /// ## Arguments
+    /// * `name` - The name of the collection.
+    /// ## Example
+    /// ```rust
+    /// use dustdata::DustData;
+    ///
+    /// let dustdata = DustData::new().unwrap();
+    ///
+    /// dustdata.drop_collection("users").unwrap();
+    /// ```
     pub fn drop_collection(&self, name: &str) -> Result<()> {
         let dustdata_config = dustdata_config();
 
