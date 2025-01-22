@@ -18,7 +18,7 @@ Add the following to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-dustdata = "2.0.0-beta.3"
+dustdata = "2.0.0-beta.6"
 ```
 
 # Usage
@@ -46,13 +46,13 @@ let user = User {
 };
 
 // Creating a new transaction.
-let mut transaction = collection.start();
+let mut transaction = collection.start_branch();
 
 // Inserting the user into the transaction.
 transaction.insert("user:1", user);
 
 // Committing the transaction.
-collection.commit(&mut transaction).unwrap();
+collection.commit(transaction).unwrap();
 
 // Done!
 ```
