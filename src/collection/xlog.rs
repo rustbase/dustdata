@@ -5,7 +5,7 @@ use crate::{
 };
 
 use serde::{Deserialize, Serialize};
-use std::{fs, ops::RangeBounds, path::Path};
+use std::{ops::RangeBounds, path::Path};
 
 pub const XLOG_FILENAME: &str = ".xlog";
 
@@ -26,7 +26,6 @@ impl<T: ValueTrait> XLog<T> {
     where
         P: AsRef<Path>,
     {
-        fs::create_dir_all(&path).ok();
         let log_path = path.as_ref().join(XLOG_FILENAME);
         let io = BlockIO::new(log_path).map_err(Error::IoError)?;
 

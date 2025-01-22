@@ -6,6 +6,7 @@ use crate::btree::{BTree, ValueTrait};
 use crate::dustdata_config;
 use crate::error::{Error, Result};
 use crate::page::io::BlockIO;
+use std::fs;
 use std::sync::Mutex;
 use std::{fmt::Debug, sync::Arc};
 use xact::TransactionBuilder;
@@ -21,6 +22,8 @@ pub enum TransactionStatus {
     Aborted,
 }
 
+pub const COLLECTION_LOCK_FILE: &str = ".lock";
+
 #[derive(Clone)]
 pub struct Collection<T: ValueTrait> {
     btree: Arc<Mutex<BTree<String, T>>>,
@@ -31,8 +34,13 @@ pub struct Collection<T: ValueTrait> {
 impl<T: ValueTrait> Collection<T> {
     pub fn new(name: &str) -> Result<Self> {
         let dustdata_config = dustdata_config();
-
         let base_path = dustdata_config.data_path.join(name);
+
+        fs::create_dir_all(&base_path).ok();
+
+        // Create lock file
+        fs::File::create_new(base_path.join(COLLECTION_LOCK_FILE))
+            .map_err(|_| Error::DatabaseLocked)?;
 
         let xlog = Arc::new(Mutex::new(xlog::XLog::new(&base_path)?));
 
@@ -97,5 +105,14 @@ impl<T: ValueTrait> Collection<T> {
     /// Gets a value from the collection
     pub fn get(&self, key: &str) -> Result<Option<T>> {
         self.btree.lock().unwrap().get(&key.to_string())
+    }
+}
+
+impl<T: ValueTrait> Drop for Collection<T> {
+    fn drop(&mut self) {
+        let dustdata_config = dustdata_config();
+        let base_path = dustdata_config.data_path.join(&self.name);
+
+        fs::remove_file(base_path.join(COLLECTION_LOCK_FILE)).unwrap();
     }
 }

@@ -61,6 +61,7 @@ use error::Result;
 use serde::{de::DeserializeOwned, Serialize};
 use std::fmt::Debug;
 use std::fs;
+use std::sync::Arc;
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
 pub enum Either<L, R> {
@@ -104,11 +105,11 @@ impl DustData {
         Ok(Self)
     }
 
-    pub fn collection<T>(&self, name: &str) -> Result<collection::Collection<T>>
+    pub fn collection<T>(&self, name: &str) -> Result<Arc<collection::Collection<T>>>
     where
         T: Sync + Send + Clone + Debug + Serialize + DeserializeOwned + 'static + Ord,
     {
-        collection::Collection::new(name)
+        Ok(Arc::new(collection::Collection::new(name)?))
     }
 
     pub fn drop_collection(&self, name: &str) -> Result<()> {

@@ -1,3 +1,4 @@
+use fs2::FileExt;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{
     fs::{self, File, OpenOptions},
@@ -171,5 +172,13 @@ pub fn open_file(path: &Path) -> io::Result<File> {
         .truncate(false)
         .open(path)?;
 
+    file.lock_exclusive()?;
+
     Ok(file)
+}
+
+impl Drop for BlockIO {
+    fn drop(&mut self) {
+        self.file.unlock().unwrap();
+    }
 }
