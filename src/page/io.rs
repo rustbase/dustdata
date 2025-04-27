@@ -1,26 +1,39 @@
-use fs2::FileExt;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Serialize};
 use std::{
     fs::{self, File, OpenOptions},
     io::{self, Read, Seek, Write},
-    mem,
     path::Path,
 };
 
+use crate::spec::ValueTrait;
+
 use super::{
-    spec::{PageNumber, PAGE_SIZE},
+    cache::{Cache, CacheBuilder},
+    layout::BlockHeader,
+    pager::Pager,
+    spec::{PageNumber, BLOCK_HEADER_SIZE, PAGE_SIZE},
     Page,
 };
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct BlockMetadata {
-    pub last_page_overflow: Option<PageNumber>,
-}
-
-pub const BLOCK_METADATA_SIZE: usize = mem::size_of::<BlockMetadata>();
-
+/// ```plaintext
+/// +--------------+ -+- 0x00
+/// | Block Header |  |
+/// +--------------+ -+- 0x20
+/// | Page 00      |
+/// +--------------+
+/// | Page 01      |
+/// +--------------+
+/// | Page 02      |
+/// +--------------+
+/// | Page 03      |
+/// +--------------+
+/// | Page 04      |
+/// +--------------+
+/// ```
 pub struct BlockIO {
+    pub header: BlockHeader,
     file: File,
+    cache: Cache,
 }
 
 impl BlockIO {
@@ -37,16 +50,36 @@ impl BlockIO {
         Self::from_file(file)
     }
 
-    fn from_file(file: File) -> io::Result<Self> {
-        let mut block = Self { file };
+    fn from_file(mut file: File) -> io::Result<Self> {
+        let cache = CacheBuilder::new().build();
 
-        if block.file.metadata()?.len() == 0 {
-            let metadata_page = Page::<()>::create(BLOCK_METADATA_SIZE as u16).unwrap();
+        let header = if is_empty(&file)? {
+            let header = BlockHeader::new();
 
-            block.write_page(0, &metadata_page)?;
-        }
+            let header_bytes = header.to_vec();
 
-        Ok(block)
+            file.seek(io::SeekFrom::Start(0))?;
+            file.write_all(&header_bytes)?;
+
+            header
+        } else {
+            let header = read_block_header(&mut file)?;
+
+            if !header.is_valid() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Invalid block header",
+                ));
+            }
+
+            header
+        };
+
+        Ok(Self {
+            file,
+            cache,
+            header,
+        })
     }
 
     pub fn copy_to<P>(&mut self, path: P) -> io::Result<Self>
@@ -74,10 +107,7 @@ impl BlockIO {
         Self::from_file(new_file)
     }
 
-    pub fn write_new_page<T>(&mut self, page: &Page<T>) -> io::Result<u32>
-    where
-        T: Serialize + DeserializeOwned + PartialOrd + Ord + Clone,
-    {
+    pub fn write_new_page(&mut self, page: &Page) -> io::Result<u64> {
         let new_index = self.len()?;
 
         self.write_page(new_index.into(), page)?;
@@ -85,75 +115,73 @@ impl BlockIO {
         Ok(new_index)
     }
 
-    pub fn write_page<T>(&mut self, page_index: u64, page: &Page<T>) -> io::Result<()>
-    where
-        T: Serialize + DeserializeOwned + PartialOrd + Ord + Clone,
-    {
+    pub fn write_page(&mut self, page_index: u64, page: &Page) -> io::Result<()> {
         self.file
-            .seek(io::SeekFrom::Start(page_index * PAGE_SIZE as u64))?;
+            .seek(io::SeekFrom::Start(self.index_to_offset(page_index)))?;
 
-        self.file.write_all(&page.to_bytes()?)
+        self.cache.dirty(page_index as u32, page.clone());
+
+        self.file.write_all(&page.to_bytes()?)?;
+        self.file.flush()
     }
 
-    pub fn read_page<T>(&mut self, page_index: u64) -> io::Result<Page<T>>
-    where
-        T: Serialize + DeserializeOwned + PartialOrd + Ord + Clone,
-    {
+    pub fn read_page(&mut self, page_index: u64) -> io::Result<Page> {
+        if let Some(page) = self.cache.get(page_index as u32) {
+            return Ok(page.clone());
+        }
+
         let mut buffer = [0; PAGE_SIZE as usize];
 
         self.file
-            .seek(io::SeekFrom::Start(page_index * PAGE_SIZE as u64))?;
+            .seek(io::SeekFrom::Start(self.index_to_offset(page_index)))?;
 
         self.file.read_exact(&mut buffer)?;
 
-        Ok(Page::open(buffer).unwrap())
+        let page = Page::open(buffer).unwrap();
+
+        if let Some(dirty_frame) = self.cache.put(page_index as u32, page.clone()) {
+            self.write_page(dirty_frame.page_number as u64, &dirty_frame.page)?;
+        }
+
+        Ok(page)
     }
 
-    pub fn read_metadata_page<T>(&mut self) -> io::Result<Page<T>>
+    pub fn page<T>(&mut self, page_index: u64) -> io::Result<Pager<T>>
     where
-        T: Serialize + DeserializeOwned + PartialOrd + Ord + Clone,
+        T: ValueTrait,
     {
-        let mut buffer = [0; PAGE_SIZE as usize];
+        let page = self.read_page(page_index)?;
 
+        Ok(Pager::new(self, page, page_index as u32))
+    }
+
+    pub fn write_header(&mut self) -> io::Result<()> {
         self.file.seek(io::SeekFrom::Start(0))?;
 
-        self.file.read_exact(&mut buffer)?;
+        self.file.write_all(&self.header.to_vec())?;
 
-        Ok(Page::open(buffer).unwrap())
+        Ok(())
     }
 
-    pub fn write_metadata_page<T>(&mut self, page: &Page<T>) -> io::Result<()>
-    where
-        T: Serialize + DeserializeOwned + PartialOrd + Ord + Clone,
-    {
-        self.file.seek(io::SeekFrom::Start(0))?;
+    pub fn len(&self) -> io::Result<u64> {
+        let file_size = self.size()?;
 
-        self.file.write_all(&page.to_bytes()?)
-    }
-
-    pub fn len(&self) -> io::Result<u32> {
-        let file_size = self.file_size()? as u32;
-
-        Ok(file_size / PAGE_SIZE as u32)
+        Ok(file_size - BLOCK_HEADER_SIZE as u64 / PAGE_SIZE as u64)
     }
 
     pub fn is_empty(&self) -> io::Result<bool> {
         Ok(self.len()? == 0)
     }
 
-    pub fn exists(&self) -> io::Result<bool> {
-        let metadata = self.file.metadata()?;
-
-        Ok(metadata.is_file() && metadata.len() != 0)
+    pub fn exists(&self, page_index: PageNumber) -> io::Result<bool> {
+        Ok(self.len()? > page_index as u64)
     }
 
-    pub fn page_exists(&self, page_index: PageNumber) -> io::Result<bool> {
-        let file_size = self.file_size()? as u32;
-
-        Ok(file_size / PAGE_SIZE as u32 > page_index)
+    pub fn index_to_offset(&self, page_index: u64) -> u64 {
+        (page_index * PAGE_SIZE as u64) + BLOCK_HEADER_SIZE as u64
     }
 
-    fn file_size(&self) -> io::Result<u64> {
+    fn size(&self) -> io::Result<u64> {
         let metadata = self.file.metadata()?;
 
         Ok(metadata.len())
@@ -172,13 +200,21 @@ pub fn open_file(path: &Path) -> io::Result<File> {
         .truncate(false)
         .open(path)?;
 
-    file.lock_exclusive()?;
-
     Ok(file)
 }
 
-impl Drop for BlockIO {
-    fn drop(&mut self) {
-        self.file.unlock().unwrap();
-    }
+pub fn is_empty(file: &File) -> io::Result<bool> {
+    let metadata = file.metadata()?;
+
+    Ok(metadata.is_file() && metadata.len() == 0)
+}
+
+pub fn read_block_header(file: &mut File) -> io::Result<BlockHeader> {
+    let mut buffer = [0; BLOCK_HEADER_SIZE];
+
+    file.seek(io::SeekFrom::Start(0))?;
+
+    file.read_exact(&mut buffer)?;
+
+    Ok(BlockHeader::from_slice(&buffer))
 }

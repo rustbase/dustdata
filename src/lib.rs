@@ -46,14 +46,15 @@
 //! let user = collection.get("user:1").unwrap();
 //! ```
 
-pub mod btree;
-pub mod collection;
+// pub mod btree;
+// pub mod collection;
 pub mod config;
 pub mod error;
 pub mod page;
 mod serializer;
+pub mod spec;
 
-pub use collection::Collection;
+// pub use collection::Collection;
 pub use config::*;
 
 pub use bincode;
@@ -116,12 +117,13 @@ impl DustData {
     ///
     /// let collection = dustdata.create_collection::<User>("users").unwrap();
     /// ```
-    pub fn collection<T>(&self, name: &str) -> Result<Arc<collection::Collection<T>>>
-    where
-        T: Sync + Send + Clone + Debug + Serialize + DeserializeOwned + 'static + Ord,
-    {
-        Ok(Arc::new(collection::Collection::new(name)?))
-    }
+    /// pub fn collection<T>(&self, name: &str) -> Result<Arc<collection::Collection<T>>>
+    /// where
+    ///     T: Sync + Send + Clone + Debug + Serialize + DeserializeOwned + 'static + Ord,
+    /// {
+    ///     Ok(Arc::new(collection::Collection::new(name)?))
+    /// }
+    ///
 
     /// Drops a collection.
     /// ## Arguments

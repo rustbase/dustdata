@@ -15,7 +15,7 @@ pub struct LockTransaction<'lock, T: ValueTrait> {
     pub collection_name: String,
 }
 
-impl<'lock, T: ValueTrait> Transaction<T> for LockTransaction<'lock, T> {
+impl<T: ValueTrait> Transaction<T> for LockTransaction<'_, T> {
     fn rollback(self) {}
 
     fn xid(&self) -> u64 {
@@ -31,7 +31,7 @@ impl<'lock, T: ValueTrait> Transaction<T> for LockTransaction<'lock, T> {
     }
 }
 
-impl<'a, T: ValueTrait> Drop for LockTransaction<'a, T> {
+impl<T: ValueTrait> Drop for LockTransaction<'_, T> {
     fn drop(&mut self) {
         let dustdata_config = dustdata_config();
         let base_path = dustdata_config.data_path.join(&self.collection_name);

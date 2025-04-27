@@ -3,7 +3,7 @@ use std::{marker::PhantomData, path::Path, sync::MutexGuard, time};
 use crate::{
     btree::{spec::BTreePair, BTree, BTreeIterator, ValueTrait},
     error::{Error, Result},
-    page::{io::BlockIO, Page},
+    page::{io::BlockIO, pager::Pager, Page},
 };
 
 use super::{
@@ -25,7 +25,7 @@ impl<T: ValueTrait> TransactionOperations<T> {
     }
 
     pub fn write(&mut self, operation: XLogOperation<T>) -> Result<()> {
-        let mut page: Page<XLogOperation<T>> = self.io.read_page(0).map_err(Error::IoError)?;
+        let mut page: Pager<XLogOperation<T>> = self.io.page(0).map_err(Error::IoError)?;
 
         page.write(operation)?;
 

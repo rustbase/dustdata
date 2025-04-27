@@ -25,12 +25,6 @@ use spec::{
 
 pub const MAX_BRANCHING_FACTOR: u16 = 100;
 
-pub trait KeyTrait: Serialize + DeserializeOwned + PartialOrd + Ord + Clone + Debug {}
-impl<T: Serialize + DeserializeOwned + PartialOrd + Ord + Clone + Debug> KeyTrait for T {}
-
-pub trait ValueTrait: Serialize + DeserializeOwned + PartialOrd + Clone + Ord + Debug {}
-impl<T: Serialize + DeserializeOwned + PartialOrd + Clone + Ord + Debug> ValueTrait for T {}
-
 #[derive(Debug)]
 pub struct Search {
     /// The page number where the search ended

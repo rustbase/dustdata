@@ -1,21 +1,24 @@
 use std::{
     cmp::Ordering,
     io::{Cursor, Read, Seek, SeekFrom, Write},
-    marker::PhantomData,
 };
 
 use crate::{
     error::{CorruptedDataError, CorruptedDataKind, Error, Result},
-    serializer::{deserialize, serialize},
     Either,
 };
 use crc32fast::Hasher;
 use layout::{CellPointerFlags, CellPointerMetadata, PageHeader};
-use serde::{de::DeserializeOwned, Serialize};
-use spec::{LocationOffset, CELL_POINTER_SIZE, PAGE_FREE_SPACE_BYTE, PAGE_HEADER_SIZE, PAGE_SIZE};
+use spec::{
+    LocationOffset, CELL_POINTER_SIZE, PAGE_FREE_SPACE_BYTE, PAGE_HEADER_SIZE, PAGE_MAGIC_BYTES,
+    PAGE_SIZE,
+};
 
+pub mod cache;
 pub mod io;
 pub mod layout;
+pub mod overflow;
+pub mod pager;
 pub mod spec;
 
 /// Slotted page layout
@@ -45,14 +48,13 @@ pub mod spec;
 /// The lower pointer points to the end of the cell pointers.
 /// The upper pointer points to the end of the cell data.
 ///
-pub struct Page<T> {
+#[derive(Clone)]
+pub struct Page {
     pub header: PageHeader,
     io: Cursor<[u8; PAGE_SIZE as usize]>,
-
-    _t: PhantomData<T>,
 }
 
-impl<T: Serialize + DeserializeOwned + PartialOrd + Ord + Clone> Page<T> {
+impl Page {
     pub fn create(special_size: u16) -> Result<Self> {
         let mut io = Cursor::new([PAGE_FREE_SPACE_BYTE; PAGE_SIZE as usize]);
 
@@ -65,17 +67,16 @@ impl<T: Serialize + DeserializeOwned + PartialOrd + Ord + Clone> Page<T> {
             lower,
             special,
             checksum: 0,
+            flags: 0,
+            next_page: None,
         };
 
         let header_bytes = bincode::serialize(&header).map_err(Error::SerializeError)?;
         io.seek(SeekFrom::Start(0)).map_err(Error::IoError)?;
-        io.write(&header_bytes).map_err(Error::IoError)?;
+        io.write(&[PAGE_MAGIC_BYTES, header_bytes.as_slice()].concat())
+            .map_err(Error::IoError)?;
 
-        let mut page: Page<T> = Page {
-            header,
-            io,
-            _t: PhantomData,
-        };
+        let mut page: Page = Page { header, io };
 
         // update checksum
         page.write_header()?;
@@ -90,7 +91,6 @@ impl<T: Serialize + DeserializeOwned + PartialOrd + Ord + Clone> Page<T> {
         let page = Self {
             io,
             header: header.clone(),
-            _t: PhantomData,
         };
 
         let checksum = page.checksum();
@@ -105,16 +105,20 @@ impl<T: Serialize + DeserializeOwned + PartialOrd + Ord + Clone> Page<T> {
         Ok(page)
     }
 
-    pub fn write(&mut self, data: T) -> Result<(LocationOffset, LocationOffset)> {
-        let data = serialize(&data)?;
+    pub fn write(&mut self, data: &[u8]) -> Result<(LocationOffset, LocationOffset)> {
+        assert!(
+            data.len() as LocationOffset
+                <= self.remaining_space() + CELL_POINTER_SIZE as LocationOffset,
+            "not enough space to write data"
+        );
 
         // cell_addr is the position of the cell in the page
-        let cell_addr: LocationOffset = self.header.upper - data.len() as LocationOffset;
+        let cell_data_addr: LocationOffset = self.header.upper - data.len() as LocationOffset;
 
         let cell_pointer_addr = self.header.lower;
 
         // cell_addr to little endian bytes
-        let cell_addr_binary = cell_addr.to_le_bytes();
+        let cell_addr_binary = cell_data_addr.to_le_bytes();
         let cell_len_binary = (data.len() as u16).to_le_bytes();
 
         // serialize cell_pointer
@@ -125,9 +129,9 @@ impl<T: Serialize + DeserializeOwned + PartialOrd + Ord + Clone> Page<T> {
 
         // write to io
         self.io
-            .seek(SeekFrom::Start(cell_addr as u64))
+            .seek(SeekFrom::Start(cell_data_addr as u64))
             .map_err(Error::IoError)?;
-        self.io.write(&data).map_err(Error::IoError)?;
+        self.io.write(data).map_err(Error::IoError)?;
 
         self.io
             .seek(SeekFrom::Start(cell_pointer_addr as u64))
@@ -135,17 +139,17 @@ impl<T: Serialize + DeserializeOwned + PartialOrd + Ord + Clone> Page<T> {
         self.io.write(&cell_pointer).map_err(Error::IoError)?;
 
         // update header
-        self.header.upper = cell_addr;
+        self.header.upper = cell_data_addr;
         self.header.lower += CELL_POINTER_SIZE as LocationOffset;
         self.write_header()?;
 
         // sync file
         // self.io.sync().map_err(Error::IoError)?;
 
-        Ok((cell_addr, cell_pointer_addr as LocationOffset))
+        Ok((cell_data_addr, self.len() - 1 as LocationOffset))
     }
 
-    pub fn write_all(&mut self, data: Vec<T>) -> Result<()> {
+    pub fn write_all(&mut self, data: &[&[u8]]) -> Result<()> {
         for i in data {
             self.write(i)?;
         }
@@ -156,10 +160,8 @@ impl<T: Serialize + DeserializeOwned + PartialOrd + Ord + Clone> Page<T> {
     pub fn insert(
         &mut self,
         index: LocationOffset,
-        data: T,
+        data: &[u8],
     ) -> Result<(LocationOffset, LocationOffset)> {
-        let data = serialize(&data)?;
-
         let offset = self.index_to_offset(index);
 
         let cell_addr: LocationOffset = self.header.upper - data.len() as LocationOffset;
@@ -198,7 +200,7 @@ impl<T: Serialize + DeserializeOwned + PartialOrd + Ord + Clone> Page<T> {
         self.io
             .seek(SeekFrom::Start(cell_addr as u64))
             .map_err(Error::IoError)?;
-        self.io.write(&data).map_err(Error::IoError)?;
+        self.io.write(data).map_err(Error::IoError)?;
 
         // write the cell pointer at the cell_pointer_offset
         self.io
@@ -215,9 +217,7 @@ impl<T: Serialize + DeserializeOwned + PartialOrd + Ord + Clone> Page<T> {
         Ok((cell_addr, cell_pointer_offset as LocationOffset))
     }
 
-    pub fn replace(&mut self, index: LocationOffset, data: T) -> Result<T> {
-        let data = serialize(&data)?;
-
+    pub fn replace(&mut self, index: LocationOffset, data: &[u8]) -> Result<Vec<u8>> {
         let offset = self.index_to_offset(index);
 
         let old_cell = self.read_at(offset)?.unwrap();
@@ -240,7 +240,7 @@ impl<T: Serialize + DeserializeOwned + PartialOrd + Ord + Clone> Page<T> {
         self.io
             .seek(SeekFrom::Start(cell_addr as u64))
             .map_err(Error::IoError)?;
-        self.io.write(&data).map_err(Error::IoError)?;
+        self.io.write(data).map_err(Error::IoError)?;
 
         // write the cell pointer at the offset
         self.io
@@ -256,26 +256,16 @@ impl<T: Serialize + DeserializeOwned + PartialOrd + Ord + Clone> Page<T> {
         Ok(old_cell)
     }
 
-    pub fn read(&mut self, index: LocationOffset) -> Result<Option<T>> {
+    pub fn read(&mut self, index: LocationOffset) -> Result<Option<Vec<u8>>> {
         let offset = self.index_to_offset(index);
 
         self.read_at(offset)
     }
 
-    pub fn read_at(&mut self, offset: usize) -> Result<Option<T>> {
+    pub fn read_at(&mut self, offset: usize) -> Result<Option<Vec<u8>>> {
         if offset >= self.header.lower as usize {
             return Ok(None);
         }
-
-        // preallocate a buffer to read the page
-        let mut buffer = [0; PAGE_SIZE as usize];
-
-        // read the page into the buffer
-        self.io.seek(SeekFrom::Start(0)).map_err(Error::IoError)?;
-        self.io.read(&mut buffer).map_err(Error::IoError)?;
-
-        // create a cursor to read the buffer
-        let mut buffer = Cursor::new(buffer);
 
         let (cell_addr, cell_len, cell_metadata) = self.read_cell_pointer(offset)?;
 
@@ -284,12 +274,10 @@ impl<T: Serialize + DeserializeOwned + PartialOrd + Ord + Clone> Page<T> {
         }
 
         let mut data = vec![0; cell_len as usize];
-        buffer
+        self.io
             .seek(SeekFrom::Start(cell_addr as u64))
             .map_err(Error::IoError)?;
-        buffer.read_exact(&mut data).unwrap();
-
-        let data = deserialize(&data)?;
+        self.io.read_exact(&mut data).unwrap();
 
         Ok(Some(data))
     }
@@ -316,7 +304,7 @@ impl<T: Serialize + DeserializeOwned + PartialOrd + Ord + Clone> Page<T> {
 
     pub fn binary_search_by<F>(&mut self, mut f: F) -> Either<u16, u16>
     where
-        F: FnMut(&T) -> Ordering,
+        F: FnMut(&[u8]) -> Ordering,
     {
         let mut size = self.len();
         let mut left = 0;
@@ -339,13 +327,13 @@ impl<T: Serialize + DeserializeOwned + PartialOrd + Ord + Clone> Page<T> {
         Either::Right(left)
     }
 
-    pub fn binary_search(&mut self, x: &T) -> Either<u16, u16> {
+    pub fn binary_search(&mut self, x: &[u8]) -> Either<u16, u16> {
         self.binary_search_by(|a| a.cmp(x))
     }
 
     pub fn binary_search_by_key<B, F>(&mut self, b: &B, mut f: F) -> Either<u16, u16>
     where
-        F: FnMut(&T) -> B,
+        F: FnMut(&[u8]) -> B,
         B: Ord,
     {
         self.binary_search_by(|k| f(k).cmp(b))
@@ -353,7 +341,7 @@ impl<T: Serialize + DeserializeOwned + PartialOrd + Ord + Clone> Page<T> {
 
     pub fn linear_search_by<F>(&mut self, mut f: F) -> Either<u16, u16>
     where
-        F: FnMut(&T) -> Ordering,
+        F: FnMut(&[u8]) -> Ordering,
     {
         let size = self.len();
         let mut pointer = 0;
@@ -371,13 +359,13 @@ impl<T: Serialize + DeserializeOwned + PartialOrd + Ord + Clone> Page<T> {
         Either::Right(pointer)
     }
 
-    pub fn linear_search(&mut self, x: &T) -> Either<u16, u16> {
+    pub fn linear_search(&mut self, x: &[u8]) -> Either<u16, u16> {
         self.linear_search_by(|a| a.cmp(x))
     }
 
     pub fn linear_search_by_key<B, F>(&mut self, b: &B, mut f: F) -> Either<u16, u16>
     where
-        F: FnMut(&T) -> B,
+        F: FnMut(&[u8]) -> B,
         B: Ord,
     {
         self.linear_search_by(|k| f(k).cmp(b))
@@ -432,13 +420,13 @@ impl<T: Serialize + DeserializeOwned + PartialOrd + Ord + Clone> Page<T> {
         page.write_special(&self.read_special()?)?;
 
         for data in data {
-            page.write(data)?;
+            page.write(&data)?;
         }
 
         Ok(page)
     }
 
-    pub fn values(&mut self) -> Result<Vec<T>> {
+    pub fn values(&mut self) -> Result<Vec<Vec<u8>>> {
         let mut data = Vec::new();
 
         for i in 0..self.len() {
@@ -450,14 +438,14 @@ impl<T: Serialize + DeserializeOwned + PartialOrd + Ord + Clone> Page<T> {
         Ok(data)
     }
 
-    pub fn split_at(&mut self, index: LocationOffset) -> Result<(Vec<T>, Vec<T>)> {
+    pub fn split_at(&mut self, index: LocationOffset) -> Result<(Vec<Vec<u8>>, Vec<Vec<u8>>)> {
         let values = self.values()?;
         let split = values.split_at(index as usize);
 
         Ok((split.0.to_vec(), split.1.to_vec()))
     }
 
-    pub fn split_off(&mut self, index: LocationOffset) -> Result<Vec<T>> {
+    pub fn split_off(&mut self, index: LocationOffset) -> Result<Vec<Vec<u8>>> {
         let mut values = self.values()?;
         let values = values.split_off(index.into());
 
@@ -515,7 +503,7 @@ impl<T: Serialize + DeserializeOwned + PartialOrd + Ord + Clone> Page<T> {
         Ok(buffer)
     }
 
-    pub fn iter(&mut self) -> PageIterator<'_, T> {
+    pub fn iter(&mut self) -> PageIterator<'_> {
         PageIterator::new(self)
     }
 
@@ -534,7 +522,9 @@ impl<T: Serialize + DeserializeOwned + PartialOrd + Ord + Clone> Page<T> {
         let buffer = bincode::serialize(&self.header).map_err(Error::SerializeError)?;
 
         self.io.seek(SeekFrom::Start(0)).map_err(Error::IoError)?;
-        self.io.write(&buffer).map_err(Error::IoError)?;
+        self.io
+            .write(&[PAGE_MAGIC_BYTES, buffer.as_slice()].concat())
+            .map_err(Error::IoError)?;
 
         Ok(())
     }
@@ -545,7 +535,7 @@ impl<T: Serialize + DeserializeOwned + PartialOrd + Ord + Clone> Page<T> {
         io.seek(SeekFrom::Start(0)).map_err(Error::IoError)?;
         io.read(&mut buffer).map_err(Error::IoError)?;
 
-        bincode::deserialize(&buffer).map_err(Error::SerializeError)
+        bincode::deserialize(&buffer[PAGE_MAGIC_BYTES.len()..]).map_err(Error::SerializeError)
     }
 
     fn checksum(&self) -> u32 {
@@ -555,21 +545,19 @@ impl<T: Serialize + DeserializeOwned + PartialOrd + Ord + Clone> Page<T> {
     }
 }
 
-pub struct PageIterator<'p, T> {
+pub struct PageIterator<'p> {
     pos: LocationOffset,
-    page: &'p mut Page<T>,
+    page: &'p mut Page,
 }
 
-impl<'p, T> PageIterator<'p, T> {
-    pub fn new(page: &'p mut Page<T>) -> Self {
+impl<'p> PageIterator<'p> {
+    pub fn new(page: &'p mut Page) -> Self {
         Self { page, pos: 0 }
     }
 }
 
-impl<'p, T: Serialize + DeserializeOwned + PartialOrd + Ord + Clone> Iterator
-    for PageIterator<'p, T>
-{
-    type Item = T;
+impl Iterator for PageIterator<'_> {
+    type Item = Vec<u8>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.pos >= self.page.len() {
@@ -593,33 +581,35 @@ impl<'p, T: Serialize + DeserializeOwned + PartialOrd + Ord + Clone> Iterator
 
 #[cfg(test)]
 mod page_tests {
+    use crate::serializer::{deserialize, serialize};
+
     use super::*;
 
     #[test]
     fn create_page() {
-        let mut page = Page::<u32>::create(0).unwrap();
+        let mut page = Page::create(0).unwrap();
 
-        page.write(32).unwrap();
-        page.write(54).unwrap();
+        page.write(&[12, 32]).unwrap();
+        page.write(&[65, 23]).unwrap();
 
         let num1 = page.read(0).unwrap().unwrap();
         let num2 = page.read(1).unwrap().unwrap();
 
-        assert_eq!(num1, 32);
-        assert_eq!(num2, 54);
+        assert_eq!(num1, &[12, 32]);
+        assert_eq!(num2, &[65, 23]);
     }
 
     #[test]
     fn delete_values_in_page() {
-        let mut page = Page::<bool>::create(0).unwrap();
+        let mut page = Page::create(0).unwrap();
 
-        page.write(true).unwrap();
-        page.write(false).unwrap();
-        page.write(true).unwrap();
+        page.write(&[1]).unwrap();
+        page.write(&[0]).unwrap();
+        page.write(&[1]).unwrap();
 
         let value = page.read(1).unwrap().unwrap();
 
-        assert!(!value);
+        assert_eq!(value, &[0]);
 
         page.delete(1).unwrap();
 
@@ -637,25 +627,25 @@ mod page_tests {
 
     #[test]
     fn insert_value_page() {
-        let mut page = Page::<String>::create(0).unwrap();
+        let mut page = Page::create(0).unwrap();
 
-        page.write("first value".to_string()).unwrap();
-        page.write("second value".to_string()).unwrap();
-        page.write("third value".to_string()).unwrap();
-
-        let value = page.read(1).unwrap().unwrap();
-
-        assert_eq!(value, "second value".to_string());
-
-        page.insert(1, "inserted value".to_string()).unwrap();
+        page.write(&[1]).unwrap();
+        page.write(&[2]).unwrap();
+        page.write(&[3]).unwrap();
 
         let value = page.read(1).unwrap().unwrap();
 
-        assert_eq!(value, "inserted value".to_string());
+        assert_eq!(value, &[2]);
+
+        page.insert(1, &[4]).unwrap();
+
+        let value = page.read(1).unwrap().unwrap();
+
+        assert_eq!(value, &[4]);
 
         let value = page.read(2).unwrap().unwrap();
 
-        assert_eq!(value, "second value".to_string());
+        assert_eq!(value, &[2]);
 
         let len = page.len();
 
@@ -664,39 +654,56 @@ mod page_tests {
 
     #[test]
     fn binary_search_page_test() {
-        let mut page = Page::<(u32, String)>::create(0).unwrap();
+        let mut page = Page::create(0).unwrap();
 
-        page.write((1, "Pedro".to_string())).unwrap();
-        page.write((2, "John".to_string())).unwrap();
-        page.write((5, "Ana".to_string())).unwrap();
-        page.write((8, "Jane".to_string())).unwrap();
-        page.write((10, "Beatriz".to_string())).unwrap();
+        page.write(&serialize(&(1, "Pedro".to_string())).unwrap())
+            .unwrap();
 
-        let found = page.binary_search_by_key(&8, |e| e.0);
+        page.write(&serialize(&(2, "John".to_string())).unwrap())
+            .unwrap();
+
+        page.write(&serialize(&(5, "Ana".to_string())).unwrap())
+            .unwrap();
+
+        page.write(&serialize(&(8, "Jane".to_string())).unwrap())
+            .unwrap();
+
+        page.write(&serialize(&(10, "Beatriz".to_string())).unwrap())
+            .unwrap();
+
+        let found = page.binary_search_by_key(&8, |e| {
+            let value: (i32, String) = deserialize(e).unwrap();
+
+            value.0
+        });
 
         assert_eq!(found, Either::Left(3));
 
         let found_value = page.read(*found.left().unwrap()).unwrap().unwrap();
 
-        assert_eq!(found_value, (8, "Jane".to_string()));
+        assert_eq!(found_value, serialize(&(8, "Jane".to_string())).unwrap());
 
-        let found = page.binary_search_by_key(&9, |e| e.0);
+        let found = page.binary_search_by_key(&9, |e| {
+            let value: (i32, String) = deserialize(e).unwrap();
+
+            value.0
+        });
 
         assert_eq!(found, Either::Right(4));
     }
 
     #[test]
     fn special_size_page_test() {
-        let mut page = Page::<u32>::create(4).unwrap();
+        let mut page = Page::create(4).unwrap();
 
-        page.write(32).unwrap();
-        page.write(16).unwrap();
+        page.write(&[32]).unwrap();
+        page.write(&[16]).unwrap();
 
         page.write_special(&[20, 10, 5, 2]).unwrap();
 
         let value = page.read(0).unwrap().unwrap();
 
-        assert_eq!(value, 32);
+        assert_eq!(value, &[32]);
 
         let special = page.read_special().unwrap();
 
@@ -705,32 +712,32 @@ mod page_tests {
 
     #[test]
     fn replace_page_test() {
-        let mut page = Page::<u32>::create(0).unwrap();
+        let mut page = Page::create(0).unwrap();
 
-        page.write(42).unwrap();
-        page.write(15).unwrap();
-
-        let value = page.read(0).unwrap().unwrap();
-
-        assert_eq!(value, 42);
-
-        page.replace(0, 90).unwrap();
+        page.write(&[42]).unwrap();
+        page.write(&[15]).unwrap();
 
         let value = page.read(0).unwrap().unwrap();
 
-        assert_eq!(value, 90);
+        assert_eq!(value, &[42]);
+
+        page.replace(0, &[90]).unwrap();
+
+        let value = page.read(0).unwrap().unwrap();
+
+        assert_eq!(value, &[90]);
     }
 
     #[test]
     fn page_checksum() {
-        let mut page = Page::<u32>::create(0).unwrap();
+        let mut page = Page::create(0).unwrap();
 
-        page.write(99).unwrap();
+        page.write(&[99]).unwrap();
 
         let mut page_bytes = page.to_bytes().unwrap();
         //change a random byte
-        page_bytes[26] = 2u8;
+        page_bytes[128] = 2u8;
 
-        Page::<u32>::open(page_bytes).err().unwrap();
+        Page::open(page_bytes).err().unwrap();
     }
 }
