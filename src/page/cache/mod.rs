@@ -238,8 +238,8 @@ mod cache_tests {
     fn put_test() {
         let mut cache = CacheBuilder::new().max_size(2).build();
 
-        cache.put(0, Page::create(0).unwrap());
-        cache.put(1, Page::create(0).unwrap());
+        cache.put(0, Page::create(0, 0).unwrap());
+        cache.put(1, Page::create(0, 0).unwrap());
 
         assert_eq!(cache.len(), 2);
     }
@@ -247,10 +247,10 @@ mod cache_tests {
     #[test]
     fn contains_test() {
         let mut cache = CacheBuilder::new().max_size(4).build();
-        let page = Page::create(0).unwrap();
-        let page1 = Page::create(0).unwrap();
-        let page2 = Page::create(0).unwrap();
-        let page3 = Page::create(0).unwrap();
+        let page = Page::create(0, 0).unwrap();
+        let page1 = Page::create(0, 0).unwrap();
+        let page2 = Page::create(0, 0).unwrap();
+        let page3 = Page::create(0, 0).unwrap();
 
         cache.put(0, page.clone());
         cache.put(1, page1.clone());

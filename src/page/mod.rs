@@ -8,31 +8,87 @@ use crate::{
     Either,
 };
 use crc32fast::Hasher;
-use layout::{CellPointerFlags, CellPointerMetadata, PageHeader};
+use layout::{PageFlag, PageHeader, TuplePointerFlags, TuplePointerMetadata};
 use spec::{
-    LocationOffset, CELL_POINTER_SIZE, PAGE_FREE_SPACE_BYTE, PAGE_HEADER_SIZE, PAGE_MAGIC_BYTES,
-    PAGE_SIZE,
+    LocationOffset, PAGE_FREE_SPACE_BYTE, PAGE_HEADER_SIZE, PAGE_MAGIC_BYTES, PAGE_SIZE,
+    TUPLE_POINTER_SIZE,
 };
 
+pub mod block;
 pub mod cache;
-pub mod io;
 pub mod layout;
 pub mod overflow;
-pub mod pager;
+pub mod paging;
 pub mod spec;
+
+#[derive(Default)]
+pub struct PageBuilder {
+    pub special_size: u16,
+    pub flags: u8,
+}
+
+impl PageBuilder {
+    pub fn new() -> Self {
+        Self {
+            special_size: 0,
+            flags: 0,
+        }
+    }
+
+    pub fn special_size(mut self, size: u16) -> Self {
+        self.special_size = size;
+        self
+    }
+
+    pub fn set(mut self, flag: PageFlag) -> Self {
+        self.flags |= flag as u8;
+        self
+    }
+
+    pub fn unset(mut self, flag: PageFlag) -> Self {
+        self.flags &= !(flag as u8);
+        self
+    }
+
+    pub fn has(&self, flag: PageFlag) -> bool {
+        self.flags & (flag as u8) != 0
+    }
+
+    pub fn build(self) -> Result<Page> {
+        Page::create(self.special_size, self.flags)
+    }
+}
+
+#[derive(PartialEq, Eq, Debug)]
+pub struct TuplePointer {
+    pub addr: LocationOffset,
+    pub len: LocationOffset,
+    pub metadata: TuplePointerMetadata,
+}
+
+impl TuplePointer {
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut bytes = vec![0; TUPLE_POINTER_SIZE as usize];
+        bytes[0..2].copy_from_slice(&self.addr.to_le_bytes());
+        bytes[2..4].copy_from_slice(&self.len.to_le_bytes());
+        bytes[4..].copy_from_slice(&self.metadata.to_vec());
+
+        bytes
+    }
+}
 
 /// Slotted page layout
 /// ```text
-///             CELL_POINTER_SIZE
+///             tuple_POINTER_SIZE
 ///                    |                           +-> header.lower
 /// PAGE_HEADER_SIZE   |                           |
 /// |--------|------------------|                  V                    
 /// +--------+-------------------+-----------------+-----------------+ -+
-/// | header |  cell pointer 01  | cell pointer 02 | --->            |  |
+/// | header |  tuple pointer 01  | tuple pointer 02 | --->            |  |
 /// +--------+-------------------+-----------------+                 |  |
 /// |                        (Free space)                            |  +- PAGE_SIZE (4096 bytes)
 /// |          +-----------------+-----------------+-----------------+  |
-/// |     <--- | cell data 02    | cell data 01    |  special space  |  |
+/// |     <--- | tuple data 02    | tuple data 01    |  special space  |  |
 /// +----------+-----------------+-----------------+-----------------+ -+
 ///            ^
 ///            |
@@ -42,11 +98,11 @@ pub mod spec;
 ///
 /// Additional header: additional metadata about the page.
 ///
-/// Cell pointer: contains the position of the cell in the page, the length of the cell, and the metadata of the cell.
-/// Cell data: the actual data of the cell.
+/// tuple pointer: contains the position of the tuple in the page, the length of the tuple, and the metadata of the tuple.
+/// tuple data: the actual data of the tuple.
 ///
-/// The lower pointer points to the end of the cell pointers.
-/// The upper pointer points to the end of the cell data.
+/// The lower pointer points to the end of the tuple pointers.
+/// The upper pointer points to the end of the tuple data.
 ///
 #[derive(Clone)]
 pub struct Page {
@@ -54,8 +110,10 @@ pub struct Page {
     io: Cursor<[u8; PAGE_SIZE as usize]>,
 }
 
+pub type PageSplit = (Vec<Vec<u8>>, Vec<Vec<u8>>);
+
 impl Page {
-    pub fn create(special_size: u16) -> Result<Self> {
+    pub fn create(special_size: u16, flags: u8) -> Result<Self> {
         let mut io = Cursor::new([PAGE_FREE_SPACE_BYTE; PAGE_SIZE as usize]);
 
         let lower = PAGE_HEADER_SIZE as LocationOffset;
@@ -67,14 +125,13 @@ impl Page {
             lower,
             special,
             checksum: 0,
-            flags: 0,
-            next_page: None,
+            flags,
         };
 
-        let header_bytes = bincode::serialize(&header).map_err(Error::SerializeError)?;
-        io.seek(SeekFrom::Start(0)).map_err(Error::IoError)?;
+        let header_bytes = bincode::serialize(&header).map_err(Error::Parsing)?;
+        io.seek(SeekFrom::Start(0)).map_err(Error::Io)?;
         io.write(&[PAGE_MAGIC_BYTES, header_bytes.as_slice()].concat())
-            .map_err(Error::IoError)?;
+            .map_err(Error::Io)?;
 
         let mut page: Page = Page { header, io };
 
@@ -96,7 +153,7 @@ impl Page {
         let checksum = page.checksum();
 
         if header.checksum != checksum {
-            return Err(Error::CorruptedData(CorruptedDataError {
+            return Err(Error::Corrupted(CorruptedDataError {
                 kind: CorruptedDataKind::ChecksumNotMatch,
                 message: "checksum does not match".to_string(),
             }));
@@ -105,53 +162,53 @@ impl Page {
         Ok(page)
     }
 
-    pub fn write(&mut self, data: &[u8]) -> Result<(LocationOffset, LocationOffset)> {
+    pub fn write(&mut self, data: &[u8], flags: u8) -> Result<(LocationOffset, LocationOffset)> {
         assert!(
-            data.len() as LocationOffset
-                <= self.remaining_space() + CELL_POINTER_SIZE as LocationOffset,
+            (data.len() as LocationOffset)
+                < (self.free_space() + TUPLE_POINTER_SIZE as LocationOffset),
             "not enough space to write data"
         );
 
-        // cell_addr is the position of the cell in the page
-        let cell_data_addr: LocationOffset = self.header.upper - data.len() as LocationOffset;
+        // tuple_addr is the position of the tuple in the page
+        let tuple_data_addr: LocationOffset = self.header.upper - data.len() as LocationOffset;
 
-        let cell_pointer_addr = self.header.lower;
+        let tuple_pointer_addr = self.header.lower;
 
-        // cell_addr to little endian bytes
-        let cell_addr_binary = cell_data_addr.to_le_bytes();
-        let cell_len_binary = (data.len() as u16).to_le_bytes();
+        // tuple_addr to little endian bytes
+        let tuple_addr_binary = tuple_data_addr.to_le_bytes();
+        let tuple_len_binary = (data.len() as u16).to_le_bytes();
 
-        // serialize cell_pointer
-        let mut cell_pointer: Vec<u8> = vec![0; CELL_POINTER_SIZE as usize];
-        cell_pointer[0..2].copy_from_slice(&cell_addr_binary);
-        cell_pointer[2..4].copy_from_slice(&cell_len_binary);
-        cell_pointer[4..].copy_from_slice(&CellPointerMetadata::default().to_vec());
+        // serialize tuple_pointer
+        let mut tuple_pointer: Vec<u8> = vec![0; TUPLE_POINTER_SIZE as usize];
+        tuple_pointer[0..2].copy_from_slice(&tuple_addr_binary);
+        tuple_pointer[2..4].copy_from_slice(&tuple_len_binary);
+        tuple_pointer[4..].copy_from_slice(&[flags]);
 
         // write to io
         self.io
-            .seek(SeekFrom::Start(cell_data_addr as u64))
-            .map_err(Error::IoError)?;
-        self.io.write(data).map_err(Error::IoError)?;
+            .seek(SeekFrom::Start(tuple_data_addr as u64))
+            .map_err(Error::Io)?;
+        self.io.write(data).map_err(Error::Io)?;
 
         self.io
-            .seek(SeekFrom::Start(cell_pointer_addr as u64))
-            .map_err(Error::IoError)?;
-        self.io.write(&cell_pointer).map_err(Error::IoError)?;
+            .seek(SeekFrom::Start(tuple_pointer_addr as u64))
+            .map_err(Error::Io)?;
+        self.io.write(&tuple_pointer).map_err(Error::Io)?;
 
         // update header
-        self.header.upper = cell_data_addr;
-        self.header.lower += CELL_POINTER_SIZE as LocationOffset;
+        self.header.upper = tuple_data_addr;
+        self.header.lower += TUPLE_POINTER_SIZE as LocationOffset;
         self.write_header()?;
 
         // sync file
-        // self.io.sync().map_err(Error::IoError)?;
+        // self.io.sync().map_err(Error::Io)?;
 
-        Ok((cell_data_addr, self.len() - 1 as LocationOffset))
+        Ok((tuple_data_addr, self.len() - 1 as LocationOffset))
     }
 
     pub fn write_all(&mut self, data: &[&[u8]]) -> Result<()> {
         for i in data {
-            self.write(i)?;
+            self.write(i, 0)?;
         }
 
         Ok(())
@@ -164,142 +221,145 @@ impl Page {
     ) -> Result<(LocationOffset, LocationOffset)> {
         let offset = self.index_to_offset(index);
 
-        let cell_addr: LocationOffset = self.header.upper - data.len() as LocationOffset;
+        let tuple_addr: LocationOffset = self.header.upper - data.len() as LocationOffset;
 
-        let cell_addr_binary = cell_addr.to_le_bytes();
-        let cell_len_binary = (data.len() as u16).to_le_bytes();
+        let tuple_addr_binary = tuple_addr.to_le_bytes();
+        let tuple_len_binary = (data.len() as u16).to_le_bytes();
 
-        let mut cell_pointer: Vec<u8> = vec![0; CELL_POINTER_SIZE as usize];
-        cell_pointer[0..2].copy_from_slice(&cell_addr_binary);
-        cell_pointer[2..4].copy_from_slice(&cell_len_binary);
-        cell_pointer[4..].copy_from_slice(&CellPointerMetadata::default().to_vec());
+        let mut tuple_pointer: Vec<u8> = vec![0; TUPLE_POINTER_SIZE as usize];
+        tuple_pointer[0..2].copy_from_slice(&tuple_addr_binary);
+        tuple_pointer[2..4].copy_from_slice(&tuple_len_binary);
+        tuple_pointer[4..].copy_from_slice(&TuplePointerMetadata::default().to_vec());
 
-        // shift the cells to the right
-        let cells_pointers_to_shift_to_right_len =
-            if offset < self.header.lower as usize - CELL_POINTER_SIZE as usize {
+        // shift the tuples to the right
+        let tuples_pointers_to_shift_to_right_len =
+            if offset < self.header.lower as usize - TUPLE_POINTER_SIZE as usize {
                 self.header.lower as usize - offset
             } else {
                 offset
             };
 
-        let mut buffer = vec![0; cells_pointers_to_shift_to_right_len];
+        let mut buffer = vec![0; tuples_pointers_to_shift_to_right_len];
         self.io
             .seek(SeekFrom::Start(offset as u64))
-            .map_err(Error::IoError)?;
-        self.io.read(&mut buffer).map_err(Error::IoError)?;
+            .map_err(Error::Io)?;
+        self.io.read(&mut buffer).map_err(Error::Io)?;
 
-        // write cells pointers to the right
+        // write tuples pointers to the right
         self.io
-            .seek(SeekFrom::Start(offset as u64 + CELL_POINTER_SIZE as u64))
-            .map_err(Error::IoError)?;
-        self.io.write(&buffer).map_err(Error::IoError)?;
+            .seek(SeekFrom::Start(offset as u64 + TUPLE_POINTER_SIZE as u64))
+            .map_err(Error::Io)?;
+        self.io.write(&buffer).map_err(Error::Io)?;
 
-        let cell_pointer_offset = offset;
+        let tuple_pointer_offset = offset;
 
-        // write the cell data at the cell_addr
+        // write the tuple data at the tuple_addr
         self.io
-            .seek(SeekFrom::Start(cell_addr as u64))
-            .map_err(Error::IoError)?;
-        self.io.write(data).map_err(Error::IoError)?;
+            .seek(SeekFrom::Start(tuple_addr as u64))
+            .map_err(Error::Io)?;
+        self.io.write(data).map_err(Error::Io)?;
 
-        // write the cell pointer at the cell_pointer_offset
+        // write the tuple pointer at the tuple_pointer_offset
         self.io
-            .seek(SeekFrom::Start(cell_pointer_offset as u64))
-            .map_err(Error::IoError)?;
-        self.io.write(&cell_pointer).map_err(Error::IoError)?;
+            .seek(SeekFrom::Start(tuple_pointer_offset as u64))
+            .map_err(Error::Io)?;
+        self.io.write(&tuple_pointer).map_err(Error::Io)?;
 
         // update header
-        self.header.upper = cell_addr as LocationOffset;
-        self.header.lower += CELL_POINTER_SIZE as LocationOffset;
+        self.header.upper = tuple_addr as LocationOffset;
+        self.header.lower += TUPLE_POINTER_SIZE as LocationOffset;
 
         self.write_header()?;
 
-        Ok((cell_addr, cell_pointer_offset as LocationOffset))
+        Ok((tuple_addr, tuple_pointer_offset as LocationOffset))
     }
 
-    pub fn replace(&mut self, index: LocationOffset, data: &[u8]) -> Result<Vec<u8>> {
+    pub fn replace(
+        &mut self,
+        index: LocationOffset,
+        data: &[u8],
+    ) -> Result<(Vec<u8>, TuplePointer)> {
         let offset = self.index_to_offset(index);
 
-        let old_cell = self.read_at(offset)?.unwrap();
-        let (cell_addr, cell_len, _) = self.read_cell_pointer(offset)?;
+        let tuple = self.read_at(offset)?.unwrap();
+        let tuple_pointer = self.tuple_pointer(offset)?;
 
-        if data.len() > cell_len.into() {
+        if data.len() > tuple_pointer.len.into() {
             // TODO: overflow
             unimplemented!("overflow on replace")
         }
 
-        let cell_addr_binary = cell_addr.to_le_bytes();
-        let cell_len_binary = (data.len() as u16).to_le_bytes();
+        let new_tuple_pointer = TuplePointer {
+            addr: tuple_pointer.addr,
+            len: data.len() as u16,
+            metadata: tuple_pointer.metadata,
+        };
 
-        let mut cell_pointer: Vec<u8> = vec![0; CELL_POINTER_SIZE as usize];
-        cell_pointer[0..2].copy_from_slice(&cell_addr_binary);
-        cell_pointer[2..4].copy_from_slice(&cell_len_binary);
-        cell_pointer[4..].copy_from_slice(&CellPointerMetadata::default().to_vec());
-
-        // write the cell data at the cell_addr
+        // write the tuple data at the tuple_addr
         self.io
-            .seek(SeekFrom::Start(cell_addr as u64))
-            .map_err(Error::IoError)?;
-        self.io.write(data).map_err(Error::IoError)?;
+            .seek(SeekFrom::Start(tuple_pointer.addr as u64))
+            .map_err(Error::Io)?;
+        self.io.write(data).map_err(Error::Io)?;
 
-        // write the cell pointer at the offset
+        // write the tuple pointer at the offset
         self.io
             .seek(SeekFrom::Start(offset as u64))
-            .map_err(Error::IoError)?;
-        self.io.write(&cell_pointer).map_err(Error::IoError)?;
+            .map_err(Error::Io)?;
+        self.io
+            .write(&new_tuple_pointer.to_bytes())
+            .map_err(Error::Io)?;
 
         // update header
-        self.header.upper = cell_addr as LocationOffset;
+        self.header.upper = tuple_pointer.addr as LocationOffset;
 
         self.write_header()?;
 
-        Ok(old_cell)
+        Ok(tuple)
     }
 
-    pub fn read(&mut self, index: LocationOffset) -> Result<Option<Vec<u8>>> {
+    pub fn read(&mut self, index: LocationOffset) -> Result<Option<(Vec<u8>, TuplePointer)>> {
         let offset = self.index_to_offset(index);
 
         self.read_at(offset)
     }
 
-    pub fn read_at(&mut self, offset: usize) -> Result<Option<Vec<u8>>> {
+    pub fn read_at(&mut self, offset: usize) -> Result<Option<(Vec<u8>, TuplePointer)>> {
         if offset >= self.header.lower as usize {
             return Ok(None);
         }
 
-        let (cell_addr, cell_len, cell_metadata) = self.read_cell_pointer(offset)?;
+        let tuple_pointer = self.tuple_pointer(offset)?;
 
-        if cell_metadata.flags == CellPointerFlags::Deleted as u8 {
+        if tuple_pointer.metadata.has(TuplePointerFlags::Deleted) {
             return Ok(None);
         }
 
-        let mut data = vec![0; cell_len as usize];
+        let mut data = vec![0; tuple_pointer.len as usize];
         self.io
-            .seek(SeekFrom::Start(cell_addr as u64))
-            .map_err(Error::IoError)?;
+            .seek(SeekFrom::Start(tuple_pointer.addr as u64))
+            .map_err(Error::Io)?;
         self.io.read_exact(&mut data).unwrap();
 
-        Ok(Some(data))
+        Ok(Some((data, tuple_pointer)))
     }
 
-    fn read_cell_pointer(
-        &mut self,
-        offset: usize,
-    ) -> Result<(LocationOffset, LocationOffset, CellPointerMetadata)> {
-        let mut cell_pointer = [0; CELL_POINTER_SIZE as usize];
+    fn tuple_pointer(&mut self, offset: usize) -> Result<TuplePointer> {
+        let mut tuple_pointer = [0; TUPLE_POINTER_SIZE as usize];
 
         self.io
             .seek(SeekFrom::Start(offset as u64))
-            .map_err(Error::IoError)?;
-        self.io
-            .read_exact(&mut cell_pointer)
-            .map_err(Error::IoError)?;
+            .map_err(Error::Io)?;
+        self.io.read_exact(&mut tuple_pointer).map_err(Error::Io)?;
 
-        let cell_addr = LocationOffset::from_le_bytes(cell_pointer[0..2].try_into().unwrap());
-        let cell_len = LocationOffset::from_le_bytes(cell_pointer[2..4].try_into().unwrap());
-        let cell_metadata = CellPointerMetadata::from_slice(&cell_pointer[4..]);
+        let tuple_addr = LocationOffset::from_le_bytes(tuple_pointer[0..2].try_into().unwrap());
+        let tuple_len = LocationOffset::from_le_bytes(tuple_pointer[2..4].try_into().unwrap());
+        let tuple_metadata = TuplePointerMetadata::from_slice(&tuple_pointer[4..]);
 
-        Ok((cell_addr, cell_len, cell_metadata))
+        Ok(TuplePointer {
+            addr: tuple_addr,
+            len: tuple_len,
+            metadata: tuple_metadata,
+        })
     }
 
     pub fn binary_search_by<F>(&mut self, mut f: F) -> Either<u16, u16>
@@ -313,7 +373,7 @@ impl Page {
         while left < right {
             let mid: LocationOffset = left + size / 2;
 
-            let data = self.read(mid).unwrap().unwrap();
+            let (data, _) = self.read(mid).unwrap().unwrap();
 
             match f(&data) {
                 Ordering::Less => left = mid + 1,
@@ -347,7 +407,7 @@ impl Page {
         let mut pointer = 0;
 
         while pointer < size {
-            let data = self.read(pointer).unwrap().unwrap();
+            let (data, _) = self.read(pointer).unwrap().unwrap();
 
             if f(&data).is_eq() {
                 return Either::Left(pointer);
@@ -378,14 +438,14 @@ impl Page {
     }
 
     pub fn delete_at(&mut self, offset: usize) -> Result<()> {
-        let cell_pointer_metadata_offset = offset + 4;
+        let tuple_pointer_metadata_offset = offset + 4;
 
         self.io
-            .seek(SeekFrom::Start(cell_pointer_metadata_offset as u64))
-            .map_err(Error::IoError)?;
+            .seek(SeekFrom::Start(tuple_pointer_metadata_offset as u64))
+            .map_err(Error::Io)?;
         self.io
-            .write(&[CellPointerFlags::Deleted as u8])
-            .map_err(Error::IoError)?;
+            .write(&[TuplePointerFlags::Deleted as u8])
+            .map_err(Error::Io)?;
 
         self.write_header()?;
 
@@ -399,14 +459,14 @@ impl Page {
         for i in range {
             let offset = self.index_to_offset(i);
 
-            let cell_pointer_metadata_offset = offset + 4;
+            let tuple_pointer_metadata_offset = offset + 4;
 
             self.io
-                .seek(SeekFrom::Start(cell_pointer_metadata_offset as u64))
-                .map_err(Error::IoError)?;
+                .seek(SeekFrom::Start(tuple_pointer_metadata_offset as u64))
+                .map_err(Error::Io)?;
             self.io
-                .write(&[CellPointerFlags::Deleted as u8])
-                .map_err(Error::IoError)?;
+                .write(&[TuplePointerFlags::Deleted as u8])
+                .map_err(Error::Io)?;
         }
 
         self.write_header()?;
@@ -415,30 +475,42 @@ impl Page {
     }
 
     pub fn compact(mut self) -> Result<Self> {
-        let data = self.values()?;
-        let mut page = Self::create(self.special_size())?;
+        let data = self.values_with_pointers()?;
+        let mut page = Self::create(self.special_size(), self.header.flags)?;
         page.write_special(&self.read_special()?)?;
 
-        for data in data {
-            page.write(&data)?;
+        for (data, tuple_pointer) in data {
+            page.write(&data, tuple_pointer.metadata.flags)?;
         }
 
         Ok(page)
     }
 
-    pub fn values(&mut self) -> Result<Vec<Vec<u8>>> {
+    fn values_with_pointers(&mut self) -> Result<Vec<(Vec<u8>, TuplePointer)>> {
         let mut data = Vec::new();
 
         for i in 0..self.len() {
-            if let Some(cell) = self.read(i)? {
-                data.push(cell);
+            if let Some(tuple) = self.read(i)? {
+                data.push(tuple);
             }
         }
 
         Ok(data)
     }
 
-    pub fn split_at(&mut self, index: LocationOffset) -> Result<(Vec<Vec<u8>>, Vec<Vec<u8>>)> {
+    pub fn values(&mut self) -> Result<Vec<Vec<u8>>> {
+        let mut data: Vec<Vec<u8>> = Vec::new();
+
+        for i in 0..self.len() {
+            if let Some((tuple_data, _)) = self.read(i)? {
+                data.push(tuple_data);
+            }
+        }
+
+        Ok(data)
+    }
+
+    pub fn split_at(&mut self, index: LocationOffset) -> Result<PageSplit> {
         let values = self.values()?;
         let split = values.split_at(index as usize);
 
@@ -461,8 +533,8 @@ impl Page {
 
         self.io
             .seek(SeekFrom::Start(special as u64))
-            .map_err(Error::IoError)?;
-        self.io.write(data).map_err(Error::IoError)?;
+            .map_err(Error::Io)?;
+        self.io.write(data).map_err(Error::Io)?;
 
         self.write_header()?;
 
@@ -474,13 +546,13 @@ impl Page {
 
         self.io
             .seek(SeekFrom::Start(self.header.special as u64))
-            .map_err(Error::IoError)?;
-        self.io.read(&mut buffer).map_err(Error::IoError)?;
+            .map_err(Error::Io)?;
+        self.io.read(&mut buffer).map_err(Error::Io)?;
 
         Ok(buffer)
     }
 
-    pub fn remaining_space(&self) -> u16 {
+    pub fn free_space(&self) -> u16 {
         self.header.upper - self.header.lower
     }
 
@@ -490,11 +562,11 @@ impl Page {
 
     pub fn len(&self) -> u16 {
         (self.header.lower - self.header_size() as LocationOffset)
-            / CELL_POINTER_SIZE as LocationOffset
+            / TUPLE_POINTER_SIZE as LocationOffset
     }
 
     pub fn index_to_offset(&self, index: LocationOffset) -> usize {
-        self.header_size() + (index as usize * CELL_POINTER_SIZE as usize)
+        self.header_size() + (index as usize * TUPLE_POINTER_SIZE as usize)
     }
 
     pub fn to_bytes(&self) -> std::io::Result<[u8; PAGE_SIZE as usize]> {
@@ -519,12 +591,12 @@ impl Page {
         let checksum = self.checksum();
         self.header.checksum = checksum;
 
-        let buffer = bincode::serialize(&self.header).map_err(Error::SerializeError)?;
+        let buffer = bincode::serialize(&self.header).map_err(Error::Parsing)?;
 
-        self.io.seek(SeekFrom::Start(0)).map_err(Error::IoError)?;
+        self.io.seek(SeekFrom::Start(0)).map_err(Error::Io)?;
         self.io
             .write(&[PAGE_MAGIC_BYTES, buffer.as_slice()].concat())
-            .map_err(Error::IoError)?;
+            .map_err(Error::Io)?;
 
         Ok(())
     }
@@ -532,10 +604,10 @@ impl Page {
     fn read_header(io: &mut Cursor<[u8; PAGE_SIZE as usize]>) -> Result<PageHeader> {
         let mut buffer = vec![0; PAGE_HEADER_SIZE];
 
-        io.seek(SeekFrom::Start(0)).map_err(Error::IoError)?;
-        io.read(&mut buffer).map_err(Error::IoError)?;
+        io.seek(SeekFrom::Start(0)).map_err(Error::Io)?;
+        io.read(&mut buffer).map_err(Error::Io)?;
 
-        bincode::deserialize(&buffer[PAGE_MAGIC_BYTES.len()..]).map_err(Error::SerializeError)
+        bincode::deserialize(&buffer[PAGE_MAGIC_BYTES.len()..]).map_err(Error::Parsing)
     }
 
     fn checksum(&self) -> u32 {
@@ -557,18 +629,18 @@ impl<'p> PageIterator<'p> {
 }
 
 impl Iterator for PageIterator<'_> {
-    type Item = Vec<u8>;
+    type Item = (Vec<u8>, TuplePointer);
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.pos >= self.page.len() {
             return None;
         }
 
-        let cell = self.page.read(self.pos).unwrap();
+        let tuple = self.page.read(self.pos).unwrap();
 
         self.pos += 1;
 
-        cell
+        tuple
     }
 
     fn last(self) -> Option<Self::Item>
@@ -587,13 +659,13 @@ mod page_tests {
 
     #[test]
     fn create_page() {
-        let mut page = Page::create(0).unwrap();
+        let mut page = Page::create(0, 0).unwrap();
 
-        page.write(&[12, 32]).unwrap();
-        page.write(&[65, 23]).unwrap();
+        page.write(&[12, 32], 0).unwrap();
+        page.write(&[65, 23], 0).unwrap();
 
-        let num1 = page.read(0).unwrap().unwrap();
-        let num2 = page.read(1).unwrap().unwrap();
+        let (num1, _) = page.read(0).unwrap().unwrap();
+        let (num2, _) = page.read(1).unwrap().unwrap();
 
         assert_eq!(num1, &[12, 32]);
         assert_eq!(num2, &[65, 23]);
@@ -601,13 +673,13 @@ mod page_tests {
 
     #[test]
     fn delete_values_in_page() {
-        let mut page = Page::create(0).unwrap();
+        let mut page = Page::create(0, 0).unwrap();
 
-        page.write(&[1]).unwrap();
-        page.write(&[0]).unwrap();
-        page.write(&[1]).unwrap();
+        page.write(&[1], 0).unwrap();
+        page.write(&[0], 0).unwrap();
+        page.write(&[1], 0).unwrap();
 
-        let value = page.read(1).unwrap().unwrap();
+        let (value, _) = page.read(1).unwrap().unwrap();
 
         assert_eq!(value, &[0]);
 
@@ -627,23 +699,23 @@ mod page_tests {
 
     #[test]
     fn insert_value_page() {
-        let mut page = Page::create(0).unwrap();
+        let mut page = Page::create(0, 0).unwrap();
 
-        page.write(&[1]).unwrap();
-        page.write(&[2]).unwrap();
-        page.write(&[3]).unwrap();
+        page.write(&[1], 0).unwrap();
+        page.write(&[2], 0).unwrap();
+        page.write(&[3], 0).unwrap();
 
-        let value = page.read(1).unwrap().unwrap();
+        let (value, _) = page.read(1).unwrap().unwrap();
 
         assert_eq!(value, &[2]);
 
         page.insert(1, &[4]).unwrap();
 
-        let value = page.read(1).unwrap().unwrap();
+        let (value, _) = page.read(1).unwrap().unwrap();
 
         assert_eq!(value, &[4]);
 
-        let value = page.read(2).unwrap().unwrap();
+        let (value, _) = page.read(2).unwrap().unwrap();
 
         assert_eq!(value, &[2]);
 
@@ -654,21 +726,21 @@ mod page_tests {
 
     #[test]
     fn binary_search_page_test() {
-        let mut page = Page::create(0).unwrap();
+        let mut page = Page::create(0, 0).unwrap();
 
-        page.write(&serialize(&(1, "Pedro".to_string())).unwrap())
+        page.write(&serialize(&(1, "Pedro".to_string())).unwrap(), 0)
             .unwrap();
 
-        page.write(&serialize(&(2, "John".to_string())).unwrap())
+        page.write(&serialize(&(2, "John".to_string())).unwrap(), 0)
             .unwrap();
 
-        page.write(&serialize(&(5, "Ana".to_string())).unwrap())
+        page.write(&serialize(&(5, "Ana".to_string())).unwrap(), 0)
             .unwrap();
 
-        page.write(&serialize(&(8, "Jane".to_string())).unwrap())
+        page.write(&serialize(&(8, "Jane".to_string())).unwrap(), 0)
             .unwrap();
 
-        page.write(&serialize(&(10, "Beatriz".to_string())).unwrap())
+        page.write(&serialize(&(10, "Beatriz".to_string())).unwrap(), 0)
             .unwrap();
 
         let found = page.binary_search_by_key(&8, |e| {
@@ -679,7 +751,7 @@ mod page_tests {
 
         assert_eq!(found, Either::Left(3));
 
-        let found_value = page.read(*found.left().unwrap()).unwrap().unwrap();
+        let (found_value, _) = page.read(*found.left().unwrap()).unwrap().unwrap();
 
         assert_eq!(found_value, serialize(&(8, "Jane".to_string())).unwrap());
 
@@ -694,14 +766,14 @@ mod page_tests {
 
     #[test]
     fn special_size_page_test() {
-        let mut page = Page::create(4).unwrap();
+        let mut page = Page::create(4, 0).unwrap();
 
-        page.write(&[32]).unwrap();
-        page.write(&[16]).unwrap();
+        page.write(&[32], 0).unwrap();
+        page.write(&[16], 0).unwrap();
 
         page.write_special(&[20, 10, 5, 2]).unwrap();
 
-        let value = page.read(0).unwrap().unwrap();
+        let (value, _) = page.read(0).unwrap().unwrap();
 
         assert_eq!(value, &[32]);
 
@@ -712,27 +784,27 @@ mod page_tests {
 
     #[test]
     fn replace_page_test() {
-        let mut page = Page::create(0).unwrap();
+        let mut page = Page::create(0, 0).unwrap();
 
-        page.write(&[42]).unwrap();
-        page.write(&[15]).unwrap();
+        page.write(&[42], 0).unwrap();
+        page.write(&[15], 0).unwrap();
 
-        let value = page.read(0).unwrap().unwrap();
+        let (value, _) = page.read(0).unwrap().unwrap();
 
         assert_eq!(value, &[42]);
 
         page.replace(0, &[90]).unwrap();
 
-        let value = page.read(0).unwrap().unwrap();
+        let (value, _) = page.read(0).unwrap().unwrap();
 
         assert_eq!(value, &[90]);
     }
 
     #[test]
     fn page_checksum() {
-        let mut page = Page::create(0).unwrap();
+        let mut page = Page::create(0, 0).unwrap();
 
-        page.write(&[99]).unwrap();
+        page.write(&[99], 0).unwrap();
 
         let mut page_bytes = page.to_bytes().unwrap();
         //change a random byte

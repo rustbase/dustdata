@@ -140,7 +140,7 @@ impl DustData {
         let dustdata_config = dustdata_config();
 
         fs::remove_dir_all(dustdata_config.data_path.join(name))
-            .map_err(|_| error::Error::NotFound("collection".to_owned()))?;
+            .map_err(|_| error::Error::Other("collection not found".to_owned()))?;
 
         Ok(())
     }

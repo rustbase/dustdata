@@ -1,35 +1,21 @@
-use std::fmt::Debug;
-
-use glob::PatternError;
+use std::{fmt::Debug, io};
 
 pub enum Error {
-    IoError(std::io::Error),
-    SerializeError(bincode::Error),
-    Deadlock,
-    DatabaseLocked,
-    AlreadyExists(String),
-    NotFound(String),
-    CorruptedData(CorruptedDataError),
+    Io(io::Error),
+    Parsing(bincode::Error),
+    Corrupted(CorruptedDataError),
+    NotEnoughSpace,
     Other(String),
-    Cannot(String),
-    PatternError(PatternError),
 }
 
 impl Debug for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Error::IoError(err) => write!(f, "IO Error: {}", err),
-            Error::Deadlock => write!(f, "Deadlock"),
-            Error::DatabaseLocked => {
-                write!(f, "Database is locked, maybe another instance is running?")
-            }
-            Error::Other(err) => write!(f, "Other Error: {}", err),
-            Error::CorruptedData(err) => write!(f, "{:?}", err),
-            Error::AlreadyExists(message) => write!(f, "{} already exists", message),
-            Error::NotFound(message) => write!(f, "{} not found", message),
-            Error::Cannot(message) => write!(f, "cannot {}", message),
-            Error::SerializeError(error) => write!(f, "serialize error {}", error),
-            Error::PatternError(error) => write!(f, "pattern error {}", error),
+            Error::Io(err) => write!(f, "{err}"),
+            Error::Parsing(err) => write!(f, "{err}"),
+            Error::Corrupted(msg) => write!(f, "Corrupted data: {:?}", msg),
+            Error::NotEnoughSpace => write!(f, "Not enough space"),
+            Error::Other(msg) => write!(f, "{}", msg),
         }
     }
 }

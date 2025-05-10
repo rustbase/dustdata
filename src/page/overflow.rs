@@ -1,24 +1,36 @@
-use super::{
-    spec::{LocationOffset, PageNumber},
-    Error, Result,
-};
 use serde::{Deserialize, Serialize};
 
-pub const OVERFLOW_POINTER_SIZE: usize = 7;
+use super::spec::{LocationOffset, PageNumber};
 
-#[derive(Deserialize, Serialize, Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct Overflow {
-    pub is_overflow: bool,
-    pub page: PageNumber,
-    pub location: LocationOffset,
+    pub page_number: PageNumber,
+    pub offset: LocationOffset,
 }
 
 impl Overflow {
-    pub fn to_vec(&self) -> Result<Vec<u8>> {
-        bincode::serialize(&self).map_err(Error::SerializeError)
+    pub fn new(page_number: PageNumber, offset: LocationOffset) -> Self {
+        Self {
+            page_number,
+            offset,
+        }
     }
 
-    pub fn from_slice(data: &[u8]) -> Result<Self> {
-        bincode::deserialize(data).map_err(Error::SerializeError)
+    pub fn page_number(&self) -> PageNumber {
+        self.page_number
+    }
+
+    pub fn offset(&self) -> LocationOffset {
+        self.offset
+    }
+
+    pub fn to_bytes(&self) -> Vec<u8> {
+        bincode::serialize(self).unwrap()
+    }
+
+    pub fn from_bytes(bytes: &[u8]) -> Self {
+        bincode::deserialize(bytes).unwrap()
     }
 }
+
+pub const OVERFLOW_SIZE: usize = 6;

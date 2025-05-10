@@ -1,4 +1,3 @@
-use serde::{de::DeserializeOwned, Serialize};
 use std::{
     fs::{self, File, OpenOptions},
     io::{self, Read, Seek, Write},
@@ -10,7 +9,6 @@ use crate::spec::ValueTrait;
 use super::{
     cache::{Cache, CacheBuilder},
     layout::BlockHeader,
-    pager::Pager,
     spec::{PageNumber, BLOCK_HEADER_SIZE, PAGE_SIZE},
     Page,
 };
@@ -30,13 +28,13 @@ use super::{
 /// | Page 04      |
 /// +--------------+
 /// ```
-pub struct BlockIO {
+pub struct Block {
     pub header: BlockHeader,
     file: File,
     cache: Cache,
 }
 
-impl BlockIO {
+impl Block {
     pub fn new<P>(path: P) -> io::Result<Self>
     where
         P: AsRef<Path>,
@@ -56,14 +54,11 @@ impl BlockIO {
         let header = if is_empty(&file)? {
             let header = BlockHeader::new();
 
-            let header_bytes = header.to_vec();
-
-            file.seek(io::SeekFrom::Start(0))?;
-            file.write_all(&header_bytes)?;
+            Self::write_header(&mut file, &header)?;
 
             header
         } else {
-            let header = read_block_header(&mut file)?;
+            let header = Self::read_header(&mut file)?;
 
             if !header.is_valid() {
                 return Err(io::Error::new(
@@ -107,7 +102,7 @@ impl BlockIO {
         Self::from_file(new_file)
     }
 
-    pub fn write_new_page(&mut self, page: &Page) -> io::Result<u64> {
+    pub fn write_new_page(&mut self, page: &Page) -> io::Result<u32> {
         let new_index = self.len()?;
 
         self.write_page(new_index.into(), page)?;
@@ -146,27 +141,19 @@ impl BlockIO {
         Ok(page)
     }
 
-    pub fn page<T>(&mut self, page_index: u64) -> io::Result<Pager<T>>
+    pub fn page<T>(&mut self, page_index: u64) -> io::Result<Page>
     where
         T: ValueTrait,
     {
         let page = self.read_page(page_index)?;
 
-        Ok(Pager::new(self, page, page_index as u32))
+        Ok(page)
     }
 
-    pub fn write_header(&mut self) -> io::Result<()> {
-        self.file.seek(io::SeekFrom::Start(0))?;
-
-        self.file.write_all(&self.header.to_vec())?;
-
-        Ok(())
-    }
-
-    pub fn len(&self) -> io::Result<u64> {
+    pub fn len(&self) -> io::Result<u32> {
         let file_size = self.size()?;
 
-        Ok(file_size - BLOCK_HEADER_SIZE as u64 / PAGE_SIZE as u64)
+        Ok((file_size as u32 - BLOCK_HEADER_SIZE as u32) / PAGE_SIZE as u32)
     }
 
     pub fn is_empty(&self) -> io::Result<bool> {
@@ -174,7 +161,7 @@ impl BlockIO {
     }
 
     pub fn exists(&self, page_index: PageNumber) -> io::Result<bool> {
-        Ok(self.len()? > page_index as u64)
+        Ok(self.len()? > page_index)
     }
 
     pub fn index_to_offset(&self, page_index: u64) -> u64 {
@@ -189,6 +176,30 @@ impl BlockIO {
 
     pub fn sync(&self) -> io::Result<()> {
         self.file.sync_data()
+    }
+
+    pub fn persist_header(&mut self) -> io::Result<()> {
+        Self::write_header(&mut self.file, &self.header)?;
+
+        Ok(())
+    }
+
+    fn write_header(file: &mut File, header: &BlockHeader) -> io::Result<()> {
+        file.seek(io::SeekFrom::Start(0))?;
+
+        file.write_all(&header.to_vec())?;
+
+        Ok(())
+    }
+
+    fn read_header(file: &mut File) -> io::Result<BlockHeader> {
+        let mut buffer = [0; BLOCK_HEADER_SIZE];
+
+        file.seek(io::SeekFrom::Start(0))?;
+
+        file.read_exact(&mut buffer)?;
+
+        Ok(BlockHeader::from_slice(&buffer))
     }
 }
 
@@ -207,14 +218,4 @@ pub fn is_empty(file: &File) -> io::Result<bool> {
     let metadata = file.metadata()?;
 
     Ok(metadata.is_file() && metadata.len() == 0)
-}
-
-pub fn read_block_header(file: &mut File) -> io::Result<BlockHeader> {
-    let mut buffer = [0; BLOCK_HEADER_SIZE];
-
-    file.seek(io::SeekFrom::Start(0))?;
-
-    file.read_exact(&mut buffer)?;
-
-    Ok(BlockHeader::from_slice(&buffer))
 }

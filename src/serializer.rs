@@ -10,15 +10,15 @@ pub fn serialize<T>(data: &T) -> Result<Vec<u8>>
 where
     T: Serialize,
 {
-    let mut bytes = bincode::serialize(data).map_err(Error::SerializeError)?;
+    let mut bytes = bincode::serialize(data).map_err(Error::Parsing)?;
 
     let compression_config = compression_config();
 
     if compression_config.enabled {
         let mut encoder = GzEncoder::new(Vec::new(), Compression::new(compression_config.level));
-        encoder.write_all(&bytes).map_err(Error::IoError)?;
+        encoder.write_all(&bytes).map_err(Error::Io)?;
 
-        bytes = encoder.finish().map_err(Error::IoError)?;
+        bytes = encoder.finish().map_err(Error::Io)?;
     }
 
     Ok(bytes)
@@ -35,8 +35,8 @@ where
         let mut buffer = Vec::new();
         decoder.read_to_end(&mut buffer).unwrap();
 
-        bincode::deserialize(&buffer).map_err(Error::SerializeError)
+        bincode::deserialize(&buffer).map_err(Error::Parsing)
     } else {
-        bincode::deserialize(bytes).map_err(Error::SerializeError)
+        bincode::deserialize(bytes).map_err(Error::Parsing)
     }
 }
