@@ -157,6 +157,72 @@ impl<'b, T: ValueTrait> Paging<'b, T> {
         Ok((tuple_pointer_offset, page_number))
     }
 
+    pub fn remove(&mut self, index: usize) -> Result<()> {
+        let tuple_pointer = self.page.read(index as LocationOffset).unwrap();
+
+        if tuple_pointer.is_none() {
+            return Ok(());
+        }
+
+        let (mut data, tuple_pointer) = tuple_pointer.unwrap();
+
+        // if is not overflow item, we can delete it directly
+        if tuple_pointer
+            .metadata
+            .not_has(TuplePointerFlags::OverflowItem)
+        {
+            self.page.delete(index as LocationOffset)?;
+            return Ok(());
+        }
+
+        loop {
+            // if is overflow item, we need to read the overflow page
+            let (overflow, _) = data.split_at(OVERFLOW_SIZE);
+
+            let overflow = Overflow::from_bytes(overflow);
+            let mut page = self.block.read_page(overflow.page_number as u64).unwrap();
+
+            let offset = overflow.offset as usize;
+
+            // read the overflow data
+            let overflow_data = page.read(offset as LocationOffset).unwrap();
+            if overflow_data.is_none() {
+                return Ok(());
+            }
+
+            let (overflow_data, tuple_pointer) = overflow_data.unwrap();
+
+            // delete the overflow data
+            page.delete(offset as LocationOffset)?;
+            self.block
+                .write_page(overflow.page_number as u64, &page)
+                .unwrap();
+
+            // if the overflow page is empty, we can delete it
+            if page.is_empty() {
+                self.block.header.free_page_overflow = overflow.page_number;
+                self.block.persist_header().unwrap();
+            }
+
+            self.block
+                .write_page(self.page_number as u64, &self.page)
+                .unwrap();
+
+            // if the overflow data is not an overflow item, we can break
+            if tuple_pointer
+                .metadata
+                .not_has(TuplePointerFlags::OverflowItem)
+            {
+                break;
+            }
+
+            // extend the raw data with the overflow data
+            data = overflow_data;
+        }
+
+        Ok(())
+    }
+
     pub fn len(&self) -> u16 {
         self.page.len()
     }
@@ -270,5 +336,22 @@ mod paging_tests {
 
         let read_value2 = paging2.get(0).unwrap().unwrap();
         assert_eq!(read_value2, value2);
+    }
+
+    #[test]
+    fn remove_overflow_data() {
+        let mut block = Block::new("test_data/paging/remove_overflow_data.db").unwrap();
+        let page = PageBuilder::new().build().unwrap();
+        block.write_new_page(&page).unwrap();
+
+        let mut paging = Paging::<String>::new(&mut block, 0, page);
+
+        let value = "Hello, world!".repeat(1000);
+        paging.write(value.clone()).unwrap();
+
+        paging.remove(0).unwrap();
+
+        let read_value = paging.get(0).unwrap();
+        assert_eq!(read_value, None);
     }
 }
