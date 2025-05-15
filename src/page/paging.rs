@@ -110,6 +110,61 @@ impl<'b, T: ValueTrait> Paging<'b, T> {
         Ok(())
     }
 
+    pub fn insert(&mut self, index: LocationOffset, value: T) -> Result<()> {
+        let data = serialize(&value)?;
+
+        let required_space = REQUIRED_SPACE as u16;
+        let free_space = self.page.free_space();
+
+        if required_space > free_space {
+            return Err(Error::NotEnoughSpace);
+        }
+
+        let free_space = self.page.free_space();
+
+        if data.len() + (TUPLE_POINTER_SIZE as usize) < free_space as usize {
+            self.page.insert(index, &data, 0)?;
+
+            if REQUIRED_SPACE as u16 >= self.page.free_space() {
+                self.page.header.set(PageFlag::Full);
+            }
+
+            self.block
+                .write_page(self.page_number as u64, &self.page)
+                .unwrap();
+
+            return Ok(());
+        }
+
+        // split data to fit into the page
+        let (data, overflow_data) = data.split_at(
+            self.page.free_space() as usize - TUPLE_POINTER_SIZE as usize - OVERFLOW_SIZE,
+        );
+
+        let (overflow_page, overflow_page_number) = self.allocate_overflow_page(
+            overflow_data.len() as u16 + TUPLE_POINTER_SIZE + OVERFLOW_SIZE as u16,
+        )?;
+
+        let (offset, overflow_page_number) =
+            self.write_recursively(overflow_data, overflow_page, overflow_page_number)?;
+
+        let overflow = Overflow::new(overflow_page_number, offset);
+
+        let data_to_write = [&overflow.to_bytes(), data].concat();
+
+        // write the overflow data to the current page
+        self.page
+            .insert(index, &data_to_write, TuplePointerFlags::OverflowItem as u8)?;
+
+        self.page.header.set(PageFlag::Full);
+
+        self.block
+            .write_page(self.page_number as u64, &self.page)
+            .unwrap();
+
+        Ok(())
+    }
+
     fn write_recursively(
         &mut self,
         data: &[u8],
@@ -266,8 +321,8 @@ impl<'b, T: ValueTrait> Paging<'b, T> {
         Ok((overflow_page, overflow_page_number))
     }
 
-    pub fn page(&self) -> &Page {
-        &self.page
+    pub fn page(&mut self) -> &mut Page {
+        &mut self.page
     }
 
     pub fn page_number(&self) -> PageNumber {
@@ -353,5 +408,40 @@ mod paging_tests {
 
         let read_value = paging.get(0).unwrap();
         assert_eq!(read_value, None);
+    }
+
+    #[test]
+    fn remove_non_overflow_data() {
+        let mut block = Block::new("test_data/paging/remove_non_overflow_data.db").unwrap();
+        let page = PageBuilder::new().build().unwrap();
+        block.write_new_page(&page).unwrap();
+
+        let mut paging = Paging::<String>::new(&mut block, 0, page);
+
+        let value = "Hello, world!".to_string();
+        paging.write(value.clone()).unwrap();
+
+        paging.remove(0).unwrap();
+
+        let read_value = paging.get(0).unwrap();
+        assert_eq!(read_value, None);
+    }
+
+    #[test]
+    fn insert_overflow_data() {
+        let mut block = Block::new("test_data/paging/insert_overflow_data.db").unwrap();
+        let page = PageBuilder::new().build().unwrap();
+        block.write_new_page(&page).unwrap();
+
+        let mut paging = Paging::<String>::new(&mut block, 0, page);
+
+        let value = "Hello, world!";
+        paging.write(value.to_owned()).unwrap();
+
+        let value = "Hello, John Doe!".repeat(1000);
+        paging.insert(0, value.clone()).unwrap();
+
+        let read_value = paging.get(0).unwrap().unwrap();
+        assert_eq!(read_value, value);
     }
 }

@@ -218,6 +218,7 @@ impl Page {
         &mut self,
         index: LocationOffset,
         data: &[u8],
+        flags: u8,
     ) -> Result<(LocationOffset, LocationOffset)> {
         let offset = self.index_to_offset(index);
 
@@ -229,7 +230,7 @@ impl Page {
         let mut tuple_pointer: Vec<u8> = vec![0; TUPLE_POINTER_SIZE as usize];
         tuple_pointer[0..2].copy_from_slice(&tuple_addr_binary);
         tuple_pointer[2..4].copy_from_slice(&tuple_len_binary);
-        tuple_pointer[4..].copy_from_slice(&TuplePointerMetadata::default().to_vec());
+        tuple_pointer[4..].copy_from_slice(&[flags]);
 
         // shift the tuples to the right
         let tuples_pointers_to_shift_to_right_len =
@@ -709,7 +710,7 @@ mod page_tests {
 
         assert_eq!(value, &[2]);
 
-        page.insert(1, &[4]).unwrap();
+        page.insert(1, &[4], 0).unwrap();
 
         let (value, _) = page.read(1).unwrap().unwrap();
 
